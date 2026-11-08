@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 安裝
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: 測試
+        run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 建置映像
+        run: |
+          BUILD="$(git rev-list --count HEAD).$(git rev-parse --short HEAD)"
+          docker build --build-arg VIDPIPE_BUILD="$BUILD" -t vidpipe:ci .
+      - name: 映像裡有 ffmpeg、CJK 字型，且 build number 進去了
+        run: |
+          BUILD="$(git rev-list --count HEAD).$(git rev-parse --short HEAD)"
+          docker run --rm --entrypoint ffmpeg vidpipe:ci -version | head -1
+          docker run --rm --entrypoint sh vidpipe:ci -c 'ls /usr/share/fonts/opentype/noto/*CJK* | head -1'
+          docker run --rm vidpipe:ci version | tee /tmp/v.json
+          grep -q "$BUILD" /tmp/v.json
