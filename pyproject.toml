@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vidpipe"
+version = "0.1.0"
+description = "Shorts 流水線：腳本 → 旁白與字幕 → 素材 → 9:16 成品（vidgrab + audio.cpp + ffmpeg）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.28",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+vidpipe = "vidpipe.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jmedzen/vidpipe"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

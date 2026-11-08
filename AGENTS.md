@@ -1,0 +1,28 @@
+# AGENTS.md — 給在這個 repo 工作的 agent
+
+vidpipe 是 Shorts 流水線：腳本 → 旁白與字幕 → 素材 → 9:16 成品。
+上游是 [vidgrab](https://github.com/jmedzen/vidgrab)（找素材）與 audio.cpp（本機 TTS，
+`POST /v1/audio/speech`）；渲染一律用 ffmpeg。完整計畫與 PR 切分見使用者專案的
+`shorts-pipeline-plan.md`（階段 0–6）。
+
+## 原則
+
+- **stdout 只有 JSON**（`{"ok": true, ...}` 或 `{"ok": false, "error": {code, message, retryable, hint}}`），
+  人看的訊息走 stderr。錯誤格式跟 vidgrab 同一套，改動要兩邊一起想。
+- **設定是資料不是程式**：TTS 模型、音色參考音檔、逐字稿、字幕語言都在 `config.py`，
+  環境變數 `VIDPIPE_<NAME>` > `vidpipe.json` > 預設。模型尚未決定，不要寫死。
+- **字幕**：`zh-TW` 或 `zh-TW+en`（雙語）兩種都要支援；`burn_subtitles` 預設 `true`，可關。
+- **渲染是純函式**：同一份 manifest 重跑得到同一支片；中間產物以內容雜湊快取。
+- **授權**：選到授權未標示的素材要在 manifest 與 credits 明確標出，不默默放行。
+- **9:16 與統一編碼屬於這個 repo**，不要塞回 vidgrab（vidgrab 只負責找與取）。
+- 祕密（token、API key）只進環境變數；`vidpipe config` 一律遮蔽，測試要驗證不外洩。
+
+## 開發
+
+```bash
+pip install -e ".[dev]"
+ruff check . && pytest -q
+```
+
+測試必須離線：ffmpeg 用合成影片，TTS 與 vidgrab 用假伺服器。
+需要真實 TTS 的驗收只能在使用者的 Mac 上跑（audio.cpp 在那邊，雲端連不到）。
