@@ -66,10 +66,11 @@ class UpstreamError(VidpipeError):
     retryable = True
 
     def __init__(self, message: str, *, upstream: str = "", upstream_code: str = "",
-                 hint: str | None = None, retryable: bool | None = None):
+                 status: int = 0, hint: str | None = None, retryable: bool | None = None):
         super().__init__(message, hint=hint, retryable=retryable)
         self.upstream = upstream
         self.upstream_code = upstream_code
+        self.status = status  # 對方的 HTTP 狀態碼（連不上等沒有回應的情況是 0）
 
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
