@@ -224,7 +224,7 @@ def _brief(c: dict[str, Any]) -> dict[str, Any]:
             "license": {"kind": _kind(c), "label": lic.get("label") or ""},
             "duration": c.get("duration"), "width": c.get("width"), "height": c.get("height"),
             "orientation": orientation_of(c), "webpage_url": c.get("webpage_url") or "",
-            "credit_hint": c.get("credit_hint") or ""}
+            "thumbnail": c.get("thumbnail") or "", "credit_hint": c.get("credit_hint") or ""}
 
 
 def _short_side(c: dict[str, Any]) -> int:
@@ -232,14 +232,23 @@ def _short_side(c: dict[str, Any]) -> int:
     return min(width, height) if width and height else 0
 
 
-def _why(c: dict[str, Any], need: float) -> str:
+def long_enough(c: dict[str, Any], need: float) -> bool:
+    """素材夠不夠長（不知道長度就當夠）。比場景多 `MARGIN` 秒才算，免得尾端剛好斷掉。"""
+    dur = float(c.get("duration") or 0)
+    return not dur or dur >= need + MARGIN - 0.05
+
+
+def _why(c: dict[str, Any], need: float, *, music: bool = False) -> str:
     parts = [f"授權{(c.get('license') or {}).get('label') or _kind(c)}"]
-    o = orientation_of(c)
-    parts.append({"portrait": "直式", "landscape": "橫式", "square": "方形"}.get(o, "尺寸不明"))
+    if not music:  # 音樂沒有「直式／橫式」可說
+        o = orientation_of(c)
+        parts.append({"portrait": "直式", "landscape": "橫式", "square": "方形"}.get(o, "尺寸不明"))
     dur = float(c.get("duration") or 0)
     if dur and need:
-        parts.append(f"長度 {dur:.1f}s {'≥' if dur >= need + MARGIN - 0.05 else '<'} "
-                     f"需要 {need:.1f}s")
+        if long_enough(c, need):
+            parts.append(f"長度 {dur:.1f}s ≥ 需要 {need:.1f}s")
+        else:
+            parts.append(f"長度 {dur:.1f}s 不夠（要 {need:.1f}s 加 {MARGIN:g}s 餘裕，會循環）")
     return "、".join(parts)
 
 
@@ -250,9 +259,13 @@ def skipped_count(candidates: list[dict[str, Any]], settings: Settings) -> int:
     return sum(1 for c in candidates if _kind(c) not in OK_LICENSES)
 
 
-def choose(candidates: list[dict[str, Any]], need: float, settings: Settings, used: set[str],
-           *, music: bool = False) -> tuple[dict[str, Any] | None, list[dict], list[str]]:
-    """從候選挑一支。回 (選中的候選或 None, 備選的簡述, 說明這次選擇的注意事項)。"""
+def rank(candidates: list[dict[str, Any]], need: float, settings: Settings, used: set[str],
+         *, music: bool = False) -> tuple[list[dict[str, Any]], list[str]]:
+    """可以用的候選，由最適合排到最不適合。回 (排好的候選, 注意事項)。
+
+    排序：授權（可自由使用 > 要標註 > 要確認 > 不明）> 夠不夠長 > 方向（直式優先）。
+    已經用在別的場景的排在後面；全都用過了就當作沒用過，並提醒。
+    """
     wanted = settings.orientation if settings.orientation in ("portrait", "landscape", "square") \
         else "portrait"
     notes: list[str] = []
@@ -266,7 +279,7 @@ def choose(candidates: list[dict[str, Any]], need: float, settings: Settings, us
     def key(item: tuple[int, dict[str, Any]]) -> tuple:
         i, c = item
         dur = float(c.get("duration") or 0)
-        short = bool(dur) and dur < need + MARGIN - 0.05
+        short = bool(dur) and not long_enough(c, need)
         if music:
             return (LICENSE_RANK[_kind(c)], short, -dur if short else 0.0, i)
         o = orientation_of(c)
@@ -274,19 +287,28 @@ def choose(candidates: list[dict[str, Any]], need: float, settings: Settings, us
         low = bool(_short_side(c)) and _short_side(c) < settings.min_height
         return (LICENSE_RANK[_kind(c)], short, orient, low, i)
 
-    ranked = sorted(fresh, key=key)
+    return [c for _, c in sorted(fresh, key=key)], notes
+
+
+def choose(candidates: list[dict[str, Any]], need: float, settings: Settings, used: set[str],
+           *, music: bool = False) -> tuple[dict[str, Any] | None, list[dict], list[str]]:
+    """從候選挑一支。回 (選中的候選或 None, 備選的簡述, 說明這次選擇的注意事項)。"""
+    wanted = settings.orientation if settings.orientation in ("portrait", "landscape", "square") \
+        else "portrait"
+    ranked, notes = rank(candidates, need, settings, used, music=music)
     if not ranked:
         return None, [], notes
-    best = ranked[0][1]
+    best = ranked[0]
     if _kind(best) not in OK_LICENSES:
         label = (best.get("license") or {}).get("label") or "未知"
         notes.append(f"{best['id']} 的授權是「{label}」，公開發佈前要自己確認")
     dur = float(best.get("duration") or 0)
-    if dur and need and dur < need + MARGIN - 0.05:
+    if not long_enough(best, need):
         notes.append(f"{best['id']} 只有 {dur:.1f} 秒，不夠 {need:.1f} 秒，渲染時會循環補長")
     if not music and orientation_of(best) not in (wanted, "unknown"):
         notes.append(f"{best['id']} 不是{'直式' if wanted == 'portrait' else wanted}，會多裁一些")
-    alternatives = [dict(_brief(c), why=_why(c, need)) for _, c in ranked[1:1 + ALTERNATIVES]]
+    alternatives = [dict(_brief(c), why=_why(c, need, music=music))
+                    for c in ranked[1:1 + ALTERNATIVES]]
     return best, alternatives, notes
 
 
@@ -374,7 +396,7 @@ def run(req: Request, cfg: Config, *, client: Any = None) -> dict[str, Any]:
             music_report["warnings"].append(msg)
             warnings.append(f"music：{msg}")
         else:
-            music_report["chosen"] = dict(_brief(best), why=_why(best, need_total))
+            music_report["chosen"] = dict(_brief(best), why=_why(best, need_total, music=True))
             doc["music"] = {**req.music_extra, "asset_id": best["id"]}
     elif req.music_extra:
         doc["music"] = req.music_extra

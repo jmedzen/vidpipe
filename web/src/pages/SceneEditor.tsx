@@ -1,9 +1,11 @@
 import { useId, useMemo, useRef, useState } from 'react'
-import { CandidateLine } from '../components/Pills'
 import { ErrorBanner } from '../components/ErrorBanner'
-import { putJson } from '../lib/api'
+import { CandidateLine, Pill } from '../components/Pills'
+import { postJson, putJson } from '../lib/api'
 import { useAction } from '../lib/useAction'
-import type { Manifest, ManifestScene, PlanCandidate, PlanPick, ShortDetail } from '../types'
+import type {
+  Manifest, ManifestScene, PlanCandidate, PlanPick, PlanScene, SearchResponse, ShortDetail,
+} from '../types'
 
 const FIT_OPTIONS = [
   { value: '', label: '預設', hint: '模糊襯底：整個畫面留著，上下補模糊的背景。' },
@@ -61,30 +63,93 @@ function numberOrUndefined(raw: string): number | undefined {
   return Number.isFinite(n) ? n : undefined
 }
 
-/** 換素材：列出 plan 挑過的候選（含原本選的），或直接輸入素材 id。 */
-function SwapClip({ candidates, onPick, label }: {
+/** 換素材：向 vidgrab 搜尋（縮圖、授權、直式優先），或用 plan 挑過的備選，或直接輸入素材 id。 */
+function SwapClip({ shortId, target, initialQuery, currentId, candidates, onPick, label }: {
+  shortId: string
+  /** `scene:<id>` 或 `music`；沒有（場景沒有 id）就不能搜尋。 */
+  target: string | null
+  initialQuery: string
+  currentId: string | undefined
   candidates: PlanCandidate[]
   onPick: (assetId: string) => void
   label: string
 }) {
+  const [query, setQuery] = useState(initialQuery)
+  const [allowUnknown, setAllowUnknown] = useState(false)
+  const [found, setFound] = useState<SearchResponse | null>(null)
+  const search = useAction()
   const [typed, setTyped] = useState('')
-  const inputId = useId()
+  const ids = useId()
+  const isMusic = target === 'music'
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!target || !query.trim()) return
+    void search.run(() => postJson<SearchResponse>(`/api/short/${encodeURIComponent(shortId)}/search`, {
+      query, target, allow_unknown_license: allowUnknown,
+    })).then((r) => {
+      if (r) setFound(r)
+    })
+  }
+  const action = (c: PlanCandidate) => (c.asset_id === currentId
+    ? <Pill tone="ok">目前使用</Pill>
+    : (
+      <button type="button" onClick={() => onPick(c.asset_id)} aria-label={`用「${c.title || c.asset_id}」`}>
+        用這個
+      </button>
+    ))
+
   return (
     <details className="swap">
       <summary>換{label}</summary>
-      {candidates.length === 0
-        ? <p className="muted small">plan 沒有留下別的候選。</p>
-        : candidates.map((c) => (
-          <CandidateLine key={c.asset_id} cand={c} action={(
-            <button type="button" onClick={() => onPick(c.asset_id)} aria-label={`用「${c.title || c.asset_id}」`}>
-              用這個
+      {target && (
+        <form className="swap-search" onSubmit={submit} role="search" aria-label={`搜尋${label}`}>
+          <label htmlFor={`${ids}-q`} className="small">搜尋{label}（關鍵字用逗號分開，英文效果最好）</label>
+          <div className="swap-row">
+            <input id={`${ids}-q`} type="text" value={query} autoComplete="off" spellCheck={false}
+                   placeholder={isMusic ? 'calm piano' : 'night market, steaming bowl'}
+                   onChange={(e) => setQuery(e.target.value)} />
+            <button type="submit" disabled={search.busy || !query.trim()}>
+              {search.busy ? '搜尋中…' : '搜尋'}
             </button>
-          )} />
-        ))}
+          </div>
+          <div className="field tick">
+            <input id={`${ids}-unk`} type="checkbox" checked={allowUnknown}
+                   onChange={(e) => setAllowUnknown(e.target.checked)} />
+            <label htmlFor={`${ids}-unk`} className="small">也列出授權不明、要自己確認的</label>
+          </div>
+        </form>
+      )}
+      {search.busy && <p className="muted small" role="status">向 vidgrab 搜尋中，通常幾秒；不會下載任何影片。</p>}
+      {search.error && <ErrorBanner error={search.error} />}
+      {found && (
+        <div className="swap-results" aria-label="搜尋結果">
+          <p className="muted small note-line">
+            找到 {found.total} 支，列出 {found.candidates.length} 支：授權明確的在前面，
+            {isMusic ? '夠長的優先' : '夠長、直式的優先'}；需要約 {found.need.toFixed(1)} 秒。
+            {found.skipped_license > 0 && `另有 ${found.skipped_license} 支授權不明或要確認，沒有列入。`}
+          </p>
+          {found.candidates.length === 0 && <p className="plan-none">沒有可用的結果，換個關鍵字試試。</p>}
+          {found.candidates.map((c) => (
+            <CandidateLine key={c.asset_id} cand={c} action={action(c)} music={isMusic} badges={(
+              <>
+                {c.used_in.length > 0 && <Pill>已用在 {c.used_in.join('、')}</Pill>}
+                {!c.enough && <Pill tone="warn">比需要的短，會循環補長</Pill>}
+              </>
+            )} />
+          ))}
+        </div>
+      )}
+      {candidates.length > 0 && (
+        <div className="swap-plan">
+          <p className="muted small">plan 挑過的備選</p>
+          {candidates.map((c) => <CandidateLine key={c.asset_id} cand={c} action={action(c)} music={isMusic} />)}
+        </div>
+      )}
       <div className="swap-manual">
-        <label htmlFor={inputId} className="small">或輸入素材 id（vidgrab 的，例如 pixabay:123）</label>
+        <label htmlFor={`${ids}-id`} className="small">或輸入素材 id（vidgrab 的，例如 pixabay:123）</label>
         <div className="swap-row">
-          <input id={inputId} type="text" value={typed} placeholder="pixabay:123" autoComplete="off"
+          <input id={`${ids}-id`} type="text" value={typed} placeholder="pixabay:123" autoComplete="off"
                  spellCheck={false} onChange={(e) => setTyped(e.target.value.trim())} />
           <button type="button" disabled={!typed.includes(':')}
                   onClick={() => { onPick(typed); setTyped('') }}>
@@ -96,10 +161,11 @@ function SwapClip({ candidates, onPick, label }: {
   )
 }
 
-function SceneFields({ scene, index, plan, onChange }: {
+function SceneFields({ scene, index, shortId, plan, onChange }: {
   scene: ManifestScene
   index: number
-  plan: PlanPick | undefined
+  shortId: string
+  plan: PlanScene | undefined
   onChange: (next: ManifestScene) => void
 }) {
   const uid = useId()
@@ -204,7 +270,9 @@ function SceneFields({ scene, index, plan, onChange }: {
             ? <code>{clipName}</code>
             : <span className="muted small">這個場景沒有指定素材。</span>}
         </div>
-        <SwapClip candidates={candidates} label="素材"
+        <SwapClip shortId={shortId} target={scene.id ? `scene:${scene.id}` : null}
+                  initialQuery={(plan?.query ?? []).join(', ')} currentId={scene.clip?.asset_id}
+                  candidates={candidates} label="素材"
                   onPick={(assetId) => set({ clip: { asset_id: assetId } })} />
       </div>
     </>
@@ -317,7 +385,9 @@ export function SceneEditor({ short, locked, onSaved, onLeave }: {
               <span className="muted small">目前的音樂：</span>
               <code>{draft.music.asset_id ?? draft.music.path ?? '—'}</code>
             </div>
-            <SwapClip label="音樂" candidates={candidatesOf(short.plan?.music ?? undefined, draft.music.asset_id)}
+            <SwapClip shortId={short.id} target="music" label="音樂" currentId={draft.music.asset_id}
+                      initialQuery={(short.plan?.music?.query ?? []).join(', ')}
+                      candidates={candidatesOf(short.plan?.music ?? undefined, draft.music.asset_id)}
                       onPick={(assetId) => setMusic({ asset_id: assetId, path: undefined, start: undefined })} />
           </>
         )}
@@ -329,7 +399,8 @@ export function SceneEditor({ short, locked, onSaved, onLeave }: {
             <span className="scene-no">{i + 1}</span>
             <code>{scene.id}</code>
           </header>
-          <SceneFields scene={scene} index={i} plan={scene.id ? planScenes.get(scene.id) : undefined}
+          <SceneFields scene={scene} index={i} shortId={short.id}
+                       plan={scene.id ? planScenes.get(scene.id) : undefined}
                        onChange={(next) => setScene(i, next)} />
         </section>
       ))}

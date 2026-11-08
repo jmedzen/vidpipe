@@ -236,9 +236,33 @@ export interface PlanCandidate {
   height: number | null
   orientation: 'portrait' | 'landscape' | 'square' | 'unknown'
   webpage_url: string
+  /** 素材站給的封面網址（只會是 http(s)；沒有就是空字串）。 */
+  thumbnail?: string
   credit_hint: string
   /** 為什麼挑它（授權、方向、長度）。只有被選中的那個有。 */
   why?: string
+}
+
+/** 換素材時搜尋的候選：多帶「已經用在哪些場景」。 */
+export interface SearchCandidate extends PlanCandidate {
+  used_in: string[]
+  current: boolean
+  /** 夠長（比需要的多一點餘裕）；false 就會循環補長。 */
+  enough: boolean
+}
+
+export interface SearchResponse {
+  ok: true
+  short_id: string
+  target: string
+  query: string[]
+  platform: string
+  /** 這個場景（或整支片）需要的秒數，粗估。 */
+  need: number
+  total: number
+  /** 授權不明、沒有列入的有幾支。 */
+  skipped_license: number
+  candidates: SearchCandidate[]
 }
 
 export interface PlanPick {

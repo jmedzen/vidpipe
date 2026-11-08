@@ -324,10 +324,12 @@ vidpipe serve --port 8080
 （`POST /api/make`，旁白、素材、已渲染的場景都走快取，所以失敗後按「重跑」只會補做缺的）。
 「刪除」會清掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑時不能刪。
 **改一支做好的片**：「場景」分頁的「編輯場景」可以改標題、每個場景的旁白（`text` 或逐句的中英文）、畫面適配（`fit`）、
-素材從第幾秒開始、最短秒數、背景音樂的音量與壓低設定，也能把場景或音樂換成 plan 留下的備選（或直接輸入素材 id）。
+素材從第幾秒開始、最短秒數、背景音樂的音量與壓低設定，也能把場景或音樂換素材：「換素材」裡可以直接向 vidgrab 搜尋
+（縮圖、授權徽章、直式與夠長的排前面、標出已經用在別的場景的；只搜尋、不下載任何影片），也可以選 plan 留下的備選，
+或直接輸入素材 id。縮圖是 vidgrab 給的 https 圖，瀏覽器直接去載（`Referrer-Policy: no-referrer`，所以來源站看不到這個網頁的網址）。
 按「儲存」才寫回 manifest（`PUT /api/short/{id}/manifest`）；這時 manifest 比成片新，頁面會提示並把按鈕變成
 「重新做（套用修改）」——旁白與場景有快取，只有改到的部分會重做。編輯期間別的視窗、agent 或重新挑素材改了
-manifest，儲存會被擋下（`stale_manifest`），不會蓋掉對方。以向 vidgrab 搜尋、看縮圖的方式換素材，見 `vidpipe-web-ui-plan.md` 的 W6。
+manifest，儲存會被擋下（`stale_manifest`），不會蓋掉對方。
 
 想先看看畫面又不想動真資料：`python tools/make_fixture.py /tmp/vp-fixture` 會用假 TTS 與合成素材做出四支片
 （做完的、有一個授權要確認的、只有旁白的、渲染失敗的），照它印出的指令 `vidpipe serve` 就能看。
@@ -349,6 +351,7 @@ API（皆為 JSON，錯誤格式同 CLI）：
 | GET | `/api/shorts` | 所有作品：階段（`new`／`planned`／`narrated`／`rendered`）、長度、素材與授權的數量（`credits`）、檔案、最近一個工作 |
 | GET | `/api/short/{id}` | 單一作品：manifest（與它的來源 `manifest_source`：`manifest`／`plan`／`draft`）、`manifest_revision`、`outdated`（manifest 比上次做出來的新：`true` 要重做、`false` 是最新、`null` 還沒做過）、plan 的挑選報告（`plan`）、時間軸摘要、素材出處、檔案、最近的工作 |
 | PUT | `/api/short/{id}/manifest` | 改 manifest：body `{"manifest": {...}, "revision": "<manifest_revision>"}`。驗證過才寫入；`revision` 已經不是現在那份（別的視窗、agent 或重新 plan 改過）回 409 `stale_manifest`；作品 id 改不了；有工作在跑回 409。改完 `POST /api/make` 只會重做改到的旁白與場景 |
+| POST | `/api/short/{id}/search` | 替這支片的一個場景或音樂搜替換素材（不寫任何檔、不下載影片）：body `{"query": "night market, steam"（字串或陣列）, "target": "scene:<場景 id>" 或 "music", "platform"（選填，預設 `stock`／音樂 `music`）, "orientation"（選填，預設 `any`）, "allow_unknown_license"（選填）, "limit"（選填，預設 24）}`。回 `candidates`：縮圖、授權、方向、長度、`why`、`enough`（夠不夠長）、`used_in`（已經用在哪些場景）、`current`；授權不明的預設不列，只回 `skipped_license` 有幾支 |
 | DELETE | `/api/short/{id}` | 刪掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑回 409 |
 | GET | `/file/{id}/{out\|work}/{檔名}` | 成品（`out`：mp4、封面、credits、srt）與中間檔（`work`）；支援 `Range` |
 

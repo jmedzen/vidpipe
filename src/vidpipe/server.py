@@ -63,10 +63,12 @@ STATIC_TYPES = {
     ".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".woff2": "font/woff2",
     ".map": "application/json",
 }
-# 外殼的 CSP：只許同源資源。React 用 CSSOM 設樣式，不受 style-src 影響。
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; "
-       "media-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; "
-       "form-action 'self'; frame-ancestors 'none'")
+# 外殼的 CSP：只許同源資源，唯一例外是圖片可以是 https（換素材時的遠端縮圖，素材站的 CDN 網址
+# 不固定）。圖片執行不了程式；`<img>` 一律帶 no-referrer。
+# React 用 CSSOM 設樣式，不受 style-src 影響。
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
+       "img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; "
+       "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
 def api_token() -> str:
@@ -306,6 +308,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **shorts_mod.update_manifest(
                     config_mod.load(), urllib.parse.unquote(parts[2]), body.get("manifest"),
                     body.get("revision"))})
+            elif (self.command == "POST" and len(parts) == 4 and parts[:2] == ["api", "short"]
+                  and parts[3] == "search"):
+                self._json({"ok": True, **shorts_mod.search_assets(
+                    config_mod.load(), urllib.parse.unquote(parts[2]), self._body())})
             elif self.command == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "short"]:
                 self._json({"ok": True, **shorts_mod.delete(
                     config_mod.load(), urllib.parse.unquote(parts[2]))})

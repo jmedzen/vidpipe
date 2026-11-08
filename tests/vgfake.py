@@ -37,15 +37,15 @@ class FakeVidgrab:
 
     @staticmethod
     def candidate(asset_id, *, duration=20.0, width=1080, height=1920, kind="free",
-                  label=None, title=None):
+                  label=None, title=None, thumbnail=""):
         """`/api/vault?project=…` 裡一支候選素材（還沒下載任何片段）。"""
         labels = {"free": "可自由使用", "free-attribution": "可用需標註", "check": "需確認授權",
                   "unknown": "未知"}
         return {"id": asset_id, "platform": asset_id.split(":")[0], "title": title or asset_id,
                 "author": "Ann", "author_url": "https://p/ann",
-                "webpage_url": f"https://p/{asset_id}", "duration": duration, "width": width,
-                "height": height, "license": {"kind": kind, "label": label or labels[kind],
-                                              "name": ""},
+                "webpage_url": f"https://p/{asset_id}", "thumbnail": thumbnail,
+                "duration": duration, "width": width, "height": height,
+                "license": {"kind": kind, "label": label or labels[kind], "name": ""},
                 "credit_hint": "Ann（Pixabay）", "clips": []}
 
     @staticmethod
