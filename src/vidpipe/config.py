@@ -40,6 +40,9 @@ class Config:
     subtitle_langs: str = "zh-TW"  # zh-TW 或 zh-TW+en（雙語）
     burn_subtitles: bool = True    # 預設燒進影片；關掉就只輸出字幕檔
     subtitle_font: str = "Noto Sans CJK TC"  # 燒字幕用的字體；要是系統裝得到的繁中字體
+    # 聲音
+    normalize_audio: bool = True   # 成片的響度標準化到 target_lufs（TTS 的音量常常偏小）
+    target_lufs: float = -14.0     # 整合響度（LUFS）；Shorts／串流平台大約都落在 -14
 
     def to_dict(self, mask: bool = False) -> dict[str, Any]:
         out = {f.name: getattr(self, f.name) for f in fields(self)}
@@ -67,6 +70,11 @@ def _coerce(name: str, value: Any, default: Any) -> Any:
         if text in ("0", "false", "no", "off", ""):
             return False
         raise ConfigError(f"{name} 要是 true/false（收到 {value!r}）")
+    if isinstance(default, float):
+        try:
+            return float(str(value).strip())
+        except ValueError:
+            raise ConfigError(f"{name} 要是數字（收到 {value!r}）") from None
     if isinstance(default, int):
         try:
             return int(str(value).strip())
@@ -105,6 +113,9 @@ def load(path: Path | None = None) -> Config:
     if not cfg.subtitle_font.strip() or any(c in cfg.subtitle_font for c in ",\n\r"):
         raise ConfigError(f"subtitle_font 不能是空的，也不能含逗號或換行"
                           f"（收到 {cfg.subtitle_font!r}）")
+    if not -30.0 <= cfg.target_lufs <= -5.0:
+        raise ConfigError(f"target_lufs 要在 -30 到 -5 之間（收到 {cfg.target_lufs:g}）",
+                          hint="Shorts 常用 -14；比 -16 小聲的片會被平台判成太小聲")
     if not 1 <= cfg.tts_concurrency <= 16:
         raise ConfigError(f"tts_concurrency 要在 1–16（收到 {cfg.tts_concurrency}）")
     cfg.vidgrab_url = cfg.vidgrab_url.rstrip("/")

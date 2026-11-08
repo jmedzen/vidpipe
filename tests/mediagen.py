@@ -71,13 +71,40 @@ def count_frames(path) -> int:
     return int(out.strip())
 
 
-def peak(path, start: float, length: float) -> int:
-    """音訊在 [start, start+length] 這段的最大振幅（16-bit；沒有音訊軌就是 0）。"""
+def peak(path, start: float, length: float, *, band: float | None = None) -> int:
+    """音訊在 [start, start+length] 這段的最大振幅（16-bit；沒有音訊軌就是 0）。
+
+    `band` 給一個頻率（Hz）就只看那個頻率附近：測試用不同頻率的純音當「旁白」與「音樂」，
+    這樣能在混好的聲音裡分開量。
+    """
+    af = ["-af", f"bandpass=f={band}:width_type=q:w=20"] if band else []
     raw = subprocess.run(
         ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", str(path),
-         "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+         "-vn", "-ac", "1", "-ar", "8000", *af, "-f", "s16le", "-"],
         capture_output=True, check=True).stdout
     return max((abs(v) for v in array.array("h", raw)), default=0)
+
+
+def tones(path, parts: Sequence[tuple[float, float]], *, amp: float = 0.25, rate: int = 48000,
+          channels: int = 2, delay: float = 0.0, total: float | None = None):
+    """依序播純音：parts 是 [(頻率 Hz, 秒數), …]；`delay` 前面補靜音、`total` 後面補到這麼長。
+
+    副檔名決定格式（.wav／.m4a）。用來做測試的旁白與背景音樂。
+    """
+    args = ["ffmpeg", "-v", "error", "-y"]
+    for freq, seconds in parts:
+        args += ["-f", "lavfi", "-i", f"sine=f={freq}:d={seconds}:r={rate}"]
+    chain = [f"concat=n={len(parts)}:v=0:a=1", f"volume={amp * 8}"]  # lavfi sine 預設振幅 1/8
+    if delay:
+        chain.append(f"adelay={int(delay * 1000)}:all=1")
+    if total:
+        chain.append(f"apad=whole_dur={total}")
+    pads = "".join(f"[{n}:a]" for n in range(len(parts)))
+    args += ["-filter_complex", f"{pads}{','.join(chain)}[a]", "-map", "[a]", "-ac", str(channels)]
+    if str(path).endswith(".m4a"):
+        args += ["-c:a", "aac"]
+    subprocess.run([*args, str(path)], check=True)
+    return path
 
 
 def has_cjk_font() -> bool:

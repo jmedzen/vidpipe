@@ -91,6 +91,24 @@ def run(args: list[str], *, timeout: float = 600.0, duration: float | None = Non
     rec.progress(1.0)
 
 
+def run_stderr(args: list[str], *, timeout: float = 600.0) -> str:
+    """跑一次 ffmpeg 並回傳它的訊息輸出（stderr）。
+
+    量測類的濾鏡（loudnorm、volumedetect）把結果印在那裡，所以這裡用 `-v info`，
+    失敗時一樣丟 RenderError。沒有進度回報——只用在很短的純音訊量測。
+    """
+    require()
+    try:
+        proc = subprocess.run(["ffmpeg", "-hide_banner", "-nostdin", "-v", "info", "-y", *args],
+                              capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise Timeout(f"ffmpeg 逾時（>{int(timeout)}s）") from exc
+    if proc.returncode != 0:
+        raise RenderError("ffmpeg 失敗：" + _tail(proc.stderr, proc.returncode),
+                          hint="確認輸入檔能播放；用 `vidpipe probe` 看它的串流資訊")
+    return proc.stderr
+
+
 def _fps(text: str | None) -> float | None:
     try:
         value = float(Fraction(text or "0"))

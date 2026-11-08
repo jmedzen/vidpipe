@@ -159,6 +159,10 @@ def test_music_needs_one_source_and_valid_values():
     fails(doc(music={"path": "a", "asset_id": "b"}), "music")
     fails(doc(music={"path": "a", "volume": 9}), "music.volume")
     fails(doc(music={"path": "a", "duck_under_voice": "yes"}), "music.duck_under_voice")
+    assert manifest.parse(doc(music={"path": "a", "start": 12.5})).music == {
+        "path": "a", "start": 12.5}
+    fails(doc(music={"path": "a", "start": -1}), "music.start")
+    fails(doc(music={"path": "a", "start": "0:12"}), "music.start")
 
 
 def test_voice_in_manifest_overrides_config_even_when_empty():
