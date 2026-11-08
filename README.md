@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`cover`、`credits`。
+> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`cover`、`credits`；HTTP API 也能送件與取成品。
 
 ## 快速開始
 
@@ -190,6 +190,15 @@ narration.wav ──────────────┴─ 編成 AAC ──
 - 成片旁邊一併產出封面與素材來源清單（見下一節）。
 - 是長指令，會留下工作紀錄（`render`，階段 `assets`／`segments`／`audio`／`mux`，帶 `short_id`）。
 
+### make：一次做完
+
+```bash
+vidpipe make shorts.json     # = narrate + render，一個工作（階段 narrate、timeline、assets、segments、audio、mux）
+```
+
+結果是 `render` 的結果多一個 `narrate`（總長、TTS 合成了幾句、警告），`warnings` 是兩邊合併。agent 通常只需要這一個指令；
+要微調再分開跑（例如只改封面標題用 `cover`，只改音樂音量用 `narrate` ＋ `render`，旁白走快取）。
+
 ### 背景音樂與響度
 
 manifest 的 `music` 給 `path`（本機音訊檔，有音訊軌的影片也行）或 `asset_id`（vidgrab 的音樂庫素材或「只要聲音」抓下來的
@@ -274,6 +283,32 @@ API（皆為 JSON，錯誤格式同 CLI）：
 | GET | `/api/jobs?status=&limit=` | 工作清單（新的在前，最多 200） |
 | GET | `/api/job/{id}[/events]?after=N` | 單一工作與事件（`after` 之後的） |
 | POST | `/api/job/{id}/cancel` | 取消還在跑的工作 |
+| POST | `/api/validate` | 檢查 manifest（本體 `{"manifest": {…}}`）；等同 `vidpipe validate` |
+| POST | `/api/make`／`narrate`／`render`／`cover`／`credits` | 送出工作（本體 `{"manifest": {…}}`，`cover` 另可帶 `at`、`text`）；回 **202** 與 `job` |
+| GET | `/api/shorts` | 所有作品：階段（`new`／`narrated`／`rendered`）、長度、檔案、最近一個工作 |
+| GET | `/api/short/{id}` | 單一作品：manifest、時間軸摘要、素材出處、檔案、最近的工作 |
+| GET | `/file/{id}/{out\|work}/{檔名}` | 成品（`out`：mp4、封面、credits、srt）與中間檔（`work`）；支援 `Range` |
+
+### 用 HTTP 讓 agent 做一支片（agent 與 vidpipe 不在同一台機器時）
+
+```bash
+H="Authorization: Bearer $VIDPIPE_API_TOKEN"        # 沒設 token 就不用
+curl -s -H "$H" -X POST localhost:8320/api/validate -d @shorts.json   # 本體是 {"manifest": …}
+JOB=$(curl -s -H "$H" -X POST localhost:8320/api/make -d "{\"manifest\": $(cat shorts.json)}" | jq -r .job)
+curl -s -H "$H" localhost:8320/api/job/$JOB | jq '{status: .job.status, stage: .job.stage, progress: .job.progress}'
+curl -s -H "$H" localhost:8320/api/short/taipei-night-01 | jq '.short.files[] | {name, url}'
+curl -s -H "$H" -o night.mp4 localhost:8320/file/taipei-night-01/out/taipei-night-01.mp4
+```
+
+- **送件**：伺服器先驗證 manifest（不合格式立刻回 400，帶欄位路徑，**不會**開工作也不會留資料夾），存成
+  `work/shorts/<id>/manifest.json`，再開一個 `python -m vidpipe <指令>` 子行程去跑。工作紀錄、進度、取消
+  跟 CLI 完全是同一套（`/api/jobs`、`/api/job/{id}`、取消送 SIGTERM），伺服器重開也不會弄丟跑到一半的工作。
+- **一支片同時只能有一個工作**：已經有就回 **409** `conflict`，訊息帶著正在跑的工作 id；不同的片可以同時跑。
+- `make` = `narrate` ＋ `render`（含封面與 credits），一個工作做完（階段 `narrate`、`timeline`、`assets`、`segments`、`audio`、`mux`）。
+  想分步做就依序送 `narrate`、`render`；`cover`／`credits` 用最近一次渲染的結果重做。
+- 取檔只認清單裡的檔名（`GET /api/short/{id}` 的 `files` 會給 `url`）；用 `-o` 另外指定輸出位置的檔案不在清單裡。
+- **注意**：manifest 的 `clip.path`、`music.path` 是**伺服器上**的路徑，拿得到 token 的人就能讓伺服器讀它能讀的檔案。
+  只在信任的環境開放（預設綁 127.0.0.1；對外一定要設 token），或只用 `asset_id`。
 
 **安全**：這個服務會呼叫 TTS、讀寫 work 目錄，所以預設只綁 `127.0.0.1`。
 
