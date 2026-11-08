@@ -36,6 +36,23 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    from . import ffmpeg
+
+    emit({"ok": True, **ffmpeg.probe(args.path)})
+    return 0
+
+
+def cmd_normalize(args: argparse.Namespace) -> int:
+    from . import video
+
+    spec = video.OutputSpec.for_aspect(args.aspect, fps=args.fps)
+    out = video.normalize(args.input, args.output, spec, fit=args.fit, focus=args.focus,
+                          audio=args.audio)
+    emit({"ok": True, "output": out})
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vidpipe",
@@ -46,6 +63,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("version", help="版本與 build number（JSON）").set_defaults(func=cmd_version)
     sub.add_parser("config", help="目前生效的設定（祕密遮蔽）").set_defaults(func=cmd_config)
+    p = sub.add_parser("probe", help="影片／音訊檔的基本資訊（JSON）")
+    p.add_argument("path")
+    p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("normalize", help="轉成統一規格並重構圖（9:16 等）")
+    p.add_argument("input")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--aspect", default="9:16", choices=["9:16", "1:1", "16:9"])
+    p.add_argument("--fit", default="blur_pad", choices=["crop", "blur_pad", "letterbox"],
+                   help="長寬比對不上時怎麼處理：裁切／模糊底／黑邊")
+    p.add_argument("--focus", help="crop 時裁哪一塊，x,y（0–1），預設置中 0.5,0.5")
+    p.add_argument("--fps", type=int, default=30)
+    p.add_argument("--audio", default="keep", choices=["keep", "silent"],
+                   help="keep 保留原音（沒有就補靜音軌）；silent 一律靜音軌")
+    p.set_defaults(func=cmd_normalize)
+
     p = sub.add_parser("doctor", help="檢查 ffmpeg、vidgrab、TTS 是否都就緒（JSON）")
     p.add_argument("--skip", help="略過的項目，逗號分隔（例如 vidgrab,tts）")
     p.set_defaults(func=cmd_doctor)
