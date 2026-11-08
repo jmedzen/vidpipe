@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from . import config as config_mod
-from .errors import VidpipeError, from_exception
+from .errors import BadInput, VidpipeError, from_exception
 from .version import __version__, build, full_version
 
 
@@ -53,6 +53,31 @@ def cmd_normalize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_trim(args: argparse.Namespace) -> int:
+    from . import edit
+
+    out = edit.trim(args.input, args.output, args.start, args.duration)
+    emit({"ok": True, "output": out})
+    return 0
+
+
+def cmd_fill(args: argparse.Namespace) -> int:
+    from . import edit
+
+    out = edit.fill(args.input, args.output, args.duration, start=args.start,
+                    loop=not args.no_loop)
+    emit({"ok": True, "output": out})
+    return 0
+
+
+def cmd_concat(args: argparse.Namespace) -> int:
+    from . import edit
+
+    out = edit.concat(args.inputs, args.output, copy=args.copy)
+    emit({"ok": True, "output": out})
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vidpipe",
@@ -79,6 +104,28 @@ def build_parser() -> argparse.ArgumentParser:
                    help="keep 保留原音（沒有就補靜音軌）；silent 一律靜音軌")
     p.set_defaults(func=cmd_normalize)
 
+    p = sub.add_parser("trim", help="精準裁切（重編碼，不會差到關鍵幀）")
+    p.add_argument("input")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--start", type=float, default=0.0, help="起點秒數")
+    p.add_argument("--duration", type=float, help="長度秒數，省略 = 到尾")
+    p.set_defaults(func=cmd_trim)
+
+    p = sub.add_parser("fill", help="湊成指定長度：夠長就裁，不夠就循環")
+    p.add_argument("input")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--duration", type=float, required=True, help="目標長度秒數")
+    p.add_argument("--start", type=float, default=0.0, help="起點秒數")
+    p.add_argument("--no-loop", action="store_true", help="不夠長時報錯而不是循環")
+    p.set_defaults(func=cmd_fill)
+
+    p = sub.add_parser("concat", help="串接多支同規格的片段（先 normalize）")
+    p.add_argument("inputs", nargs="+")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--copy", action="store_true",
+                   help="不重編碼（快、零損失；AAC 接縫可能有幾十毫秒誤差）")
+    p.set_defaults(func=cmd_concat)
+
     p = sub.add_parser("doctor", help="檢查 ffmpeg、vidgrab、TTS 是否都就緒（JSON）")
     p.add_argument("--skip", help="略過的項目，逗號分隔（例如 vidgrab,tts）")
     p.set_defaults(func=cmd_doctor)
@@ -96,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             traceback.print_exc()
         err: VidpipeError = from_exception(exc)
         emit(err.to_dict())
-        return 130 if isinstance(exc, KeyboardInterrupt) else 2 if err.code == "bad_input" else 1
+        return 130 if isinstance(exc, KeyboardInterrupt) else 2 if isinstance(err, BadInput) else 1
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ import shutil
 import subprocess
 
 import pytest
+from mediagen import make as _make
+from mediagen import pixel as _pixel
 
 from vidpipe import cli, ffmpeg, video
 from vidpipe.errors import BadInput, NotFound
@@ -12,28 +14,6 @@ from vidpipe.video import OutputSpec
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="需要 ffmpeg")
-
-
-def _make(path, lavfi: str, *, audio: bool, seconds: float = 2.0, fps: int = 25):
-    """用合成來源做測試影片。lavfi 是影像來源（含尺寸）。"""
-    args = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"{lavfi}:d={seconds}:r={fps}"]
-    if audio:
-        args += ["-f", "lavfi", "-i", f"sine=d={seconds}"]
-    args += ["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast"]
-    if audio:
-        args += ["-c:a", "aac", "-shortest"]
-    subprocess.run([*args, str(path)], check=True)
-    return path
-
-
-def _pixel(path, x: int, y: int) -> tuple[int, int, int]:
-    """取第一格的某個像素（RGB）。"""
-    info = ffmpeg.probe(path)
-    raw = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-frames:v", "1", "-f", "rawvideo",
-         "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
-    off = (y * info["width"] + x) * 3
-    return raw[off], raw[off + 1], raw[off + 2]
 
 
 # 左半紅、右半藍的橫式影片：用來驗證 crop 的 focus 裁到哪一邊
