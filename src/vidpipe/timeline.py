@@ -1,4 +1,4 @@
-"""時間軸：每一句旁白的實際秒數 → 場景長度、字幕時間、整段旁白音軌。
+"""時間軸：每一句旁白的實際秒數 → 場景長度、字幕時間、整段旁白音軌、字幕檔。
 
 規則（秒，`manifest.timing` 可調）：
 
@@ -11,7 +11,8 @@
   一條音軌混進去，旁白跟字幕永遠對得上。
 
 產物放在 `work_dir/shorts/<id>/`：`manifest.json`（驗證過的原稿）、`timeline.json`、
-`narration.wav`。重跑同一份 manifest 會得到同樣的內容（旁白走快取）。
+`narration.wav`、`subs.srt`、`subs.ass`（字幕，見 `subtitles`）。重跑同一份 manifest 會得到
+同樣的內容（旁白走快取）。
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import ffmpeg, jobs, narration
+from . import ffmpeg, jobs, narration, subtitles
 from .config import Config
 from .errors import BadInput, UpstreamError
 from .manifest import Manifest
@@ -34,6 +35,8 @@ from .narration import Clip
 SCHEMA = "vidpipe.timeline/1"
 SOFT_LIMIT = 60.0    # 秒。Shorts 傳統的長度；超過只提醒
 HARD_LIMIT = 180.0   # 秒。超過 3 分鐘就不會被當成 Shorts
+SRT_FILE = "subs.srt"
+ASS_FILE = "subs.ass"
 
 
 @dataclass(frozen=True)
@@ -225,13 +228,17 @@ def short_dir(cfg: Config, short_id: str) -> Path:
     return Path(cfg.work_dir) / "shorts" / short_id
 
 
-def _atomic_json(path: Path, data: Any) -> None:
+def _atomic_text(path: Path, text: str) -> None:
     tmp = path.with_name(f".{path.stem}.partial{path.suffix}")
     try:
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.write_text(text, encoding="utf-8")
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _atomic_json(path: Path, data: Any) -> None:
+    _atomic_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
 def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
@@ -244,20 +251,32 @@ def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
     clips = narration.synthesize(texts, cfg) if texts else []
     jobs.stage("timeline", f"{len(manifest.scenes)} 個場景")
     timeline = build(manifest, clips)
-    for message in timeline.warnings:
+    subs = subtitles.build(timeline, manifest.subtitles, manifest.output, cfg.subtitle_font) \
+        if texts else None
+    warnings = [*timeline.warnings, *(subs.warnings if subs else ())]
+    for message in warnings:
         jobs.log(message, "warning")
 
     root = short_dir(cfg, manifest.id)
     root.mkdir(parents=True, exist_ok=True)
     _atomic_json(root / "manifest.json", raw)
     audio = write_narration(timeline, root / "narration.wav") if texts else None
-    if audio is None:  # 上一版有旁白、這一版沒有：別留下過期的音軌
-        (root / "narration.wav").unlink(missing_ok=True)
+    if audio is None:  # 上一版有旁白、這一版沒有：別留下過期的音軌與字幕
+        for name in ("narration.wav", SRT_FILE, ASS_FILE):
+            (root / name).unlink(missing_ok=True)
+    if subs:
+        _atomic_text(root / SRT_FILE, subs.srt)
+        _atomic_text(root / ASS_FILE, subs.ass)
     data = timeline.to_dict()
+    data["warnings"] = warnings
     # 檔名而不是絕對路徑，理由同 Cue.to_dict
     data["narration"] = None if audio is None else {
         "file": "narration.wav", "duration": audio["duration"],
         "sample_rate": audio["sample_rate"], "channels": audio["channels"]}
+    data["subtitles"] = None if subs is None else {
+        "langs": manifest.subtitles.langs, "style": manifest.subtitles.style,
+        "burn_in": manifest.subtitles.burn_in, "font": cfg.subtitle_font,
+        "srt": SRT_FILE, "ass": ASS_FILE, "entries": len(subs.entries)}
     data["voice"] = {"model": cfg.tts_model, "voice_ref": cfg.voice_ref,
                      "reference_text": cfg.reference_text}
     _atomic_json(root / "timeline.json", data)
@@ -265,6 +284,7 @@ def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
     return {"short_id": manifest.id, "dir": str(root), "total": timeline.total,
             "scenes": [{"id": s.id, "start": s.start, "duration": s.duration,
                         "sentences": len(s.cues)} for s in timeline.scenes],
-            "warnings": list(timeline.warnings), "narration": audio["path"] if audio else None,
+            "warnings": warnings, "narration": audio["path"] if audio else None,
+            "subtitles": {"srt": str(root / SRT_FILE), "ass": str(root / ASS_FILE),
+                          "entries": len(subs.entries)} if subs else None,
             "timeline": str(root / "timeline.json"), "tts": tts}
-

@@ -5,40 +5,16 @@ import shutil
 import wave
 
 import pytest
+from tlhelp import RATE, clips_for, parse, tone
 from ttsfake import FakeTTS
 
-from vidpipe import cli, jobs, manifest, timeline
+from vidpipe import cli, jobs, timeline
 from vidpipe.config import Config
 from vidpipe.errors import BadInput
 from vidpipe.narration import Clip
 
 needs_ffmpeg = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="需要 ffmpeg")
-
-RATE = 24000
-
-
-def parse(scenes, **top):
-    return manifest.parse({"schema": "vidpipe.manifest/1", "id": "t1", "scenes": scenes, **top})
-
-
-def clips_for(m, durations, directory=None):
-    """依序給每一句一個長度的假 Clip（不碰 TTS）。"""
-    texts = timeline.sentence_texts(m)
-    assert len(texts) == len(durations)
-    return [Clip(i, t, f"{directory or '/cache'}/{i}.wav", d, False)
-            for i, (t, d) in enumerate(zip(texts, durations, strict=True))]
-
-
-def tone(path, seconds, value=1000, rate=RATE, channels=1):
-    """整段都是固定非零值的 WAV，方便檢查「這個位置有沒有聲音」。"""
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(channels)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(value.to_bytes(2, "little", signed=True) * channels * round(seconds * rate))
-    return str(path)
-
 
 # ------------------------------------------------------------------ 排時間
 
@@ -215,8 +191,8 @@ def test_cli_narrate_writes_manifest_timeline_and_narration_into_the_short_folde
     result = out["output"]
     root = tmp_path / "work" / "shorts" / "night-01"
     assert result["dir"] == str(root) and result["tts"] == {"sentences": 3, "synthesized": 3}
-    assert sorted(p.name for p in root.iterdir()) == ["manifest.json", "narration.wav",
-                                                      "timeline.json"]
+    assert sorted(p.name for p in root.iterdir()) == [
+        "manifest.json", "narration.wav", "subs.ass", "subs.srt", "timeline.json"]
     assert json.loads((root / "manifest.json").read_text(encoding="utf-8")) == MANIFEST
     tl = json.loads((root / "timeline.json").read_text(encoding="utf-8"))
     assert tl["voice"]["model"] == "cosy-test"
