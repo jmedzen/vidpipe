@@ -272,6 +272,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
                            hint="換一個 --port，或確認沒有重複啟動") from exc
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from . import mcp
+
+    return mcp.serve_stdio()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vidpipe",
@@ -387,6 +393,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-auth", action="store_true",
                    help="綁非本機位址也不要 token（外層已有保護時才用）")
     p.set_defaults(func=cmd_serve)
+
+    sub.add_parser("mcp", help="MCP server（stdio）：給 Claude Code 等 client 以子行程啟動"
+                   ).set_defaults(func=cmd_mcp)
 
     p = sub.add_parser("doctor", help="檢查 ffmpeg、vidgrab、TTS 是否都就緒（JSON）")
     p.add_argument("--skip", help="略過的項目，逗號分隔（例如 vidgrab,tts）")
