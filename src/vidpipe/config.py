@@ -39,6 +39,7 @@ class Config:
     # 字幕
     subtitle_langs: str = "zh-TW"  # zh-TW 或 zh-TW+en（雙語）
     burn_subtitles: bool = True    # 預設燒進影片；關掉就只輸出字幕檔
+    subtitle_font: str = "Noto Sans CJK TC"  # 燒字幕用的字體；要是系統裝得到的繁中字體
 
     def to_dict(self, mask: bool = False) -> dict[str, Any]:
         out = {f.name: getattr(self, f.name) for f in fields(self)}
@@ -101,6 +102,9 @@ def load(path: Path | None = None) -> Config:
     if cfg.subtitle_langs not in _VALID_SUBTITLES:
         raise ConfigError(f"subtitle_langs 不認得：{cfg.subtitle_langs}",
                           hint="可用 zh-TW 或 zh-TW+en")
+    if not cfg.subtitle_font.strip() or any(c in cfg.subtitle_font for c in ",\n\r"):
+        raise ConfigError(f"subtitle_font 不能是空的，也不能含逗號或換行"
+                          f"（收到 {cfg.subtitle_font!r}）")
     if not 1 <= cfg.tts_concurrency <= 16:
         raise ConfigError(f"tts_concurrency 要在 1–16（收到 {cfg.tts_concurrency}）")
     cfg.vidgrab_url = cfg.vidgrab_url.rstrip("/")

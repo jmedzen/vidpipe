@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`；旁白時間軸、字幕依序在後續 PR。
+> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`（manifest、時間軸、字幕檔）；渲染在後續 PR。
 
 ## 快速開始
 
@@ -43,6 +43,7 @@ vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_
 | `voice_ref` / `reference_text` | 空 | 音色參考音檔與逐字稿（CosyVoice3 等需要） |
 | `subtitle_langs` | `zh-TW` | `zh-TW` 或 `zh-TW+en`（雙語） |
 | `burn_subtitles` | `true` | 字幕是否燒進影片；關掉只輸出字幕檔 |
+| `subtitle_font` | `Noto Sans CJK TC` | 燒字幕用的字體（系統要裝得到；Docker 映像裡有 Noto CJK，Mac 請改成 `PingFang TC` 之類） |
 | `work_dir` / `out_dir` | `work` / `out` | 中間產物與成品 |
 | `record_jobs` | `true` | 長指令是否在 `work_dir/_jobs` 留下紀錄（網頁看得到）；關掉就不寫 |
 
@@ -73,9 +74,88 @@ vidpipe speak script.txt --out-dir wavs   # 另外複製成 001.wav、002.wav…
 - 是長指令，會留下工作紀錄（`narrate`），網頁看得到逐句進度。
 - 真實的 audio.cpp 要先載入模型；CosyVoice3 還要 `voice_ref` 與 `reference_text`（`vidpipe doctor` 會檢查）。
 
+## manifest：宣告式描述一支片
+
+agent 寫一份 JSON，`validate`／`narrate`／（之後的）`render` 都只讀它；同一份 manifest 重跑得到同一支片。
+
+```json
+{
+  "schema": "vidpipe.manifest/1",
+  "id": "taipei-night-01",
+  "title": "台北夜市",
+  "output": {"aspect": "9:16", "fps": 30},
+  "voice": {"model": "", "voice_ref": "", "reference_text": ""},
+  "timing": {"lead": 0.15, "gap": 0.25, "tail": 0.45},
+  "scenes": [
+    {"id": "s1", "text": "台北的夜晚，從一碗熱湯開始。",
+     "clip": {"asset_id": "pixabay:123", "start": 3.0}, "fit": "blur_pad", "focus": "0.5,0.5"},
+    {"id": "s2", "sentences": [{"text": "夜市很熱鬧。", "en": "The market is lively."}]},
+    {"id": "s3", "min_duration": 2.0}
+  ],
+  "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
+  "music": {"path": "/path/bgm.mp3", "volume": 0.12, "duck_under_voice": true}
+}
+```
+
+- 只有 `schema`、`id`、`scenes` 必填。`id` 是小寫英數、底線、連字號（最長 64 字），會當資料夾名稱。
+- 旁白給 `text`（自動分句）或 `sentences`（明確列出每一句；雙語字幕要配英文時用），兩個擇一。
+  沒有旁白的場景要給 `min_duration`（秒，最長 120）。
+- `voice` 寫了就蓋過設定檔與環境變數（寫空字串 = 明確要伺服器預設）；`subtitles` 沒寫的欄位用設定檔的 `subtitle_langs`／`burn_subtitles`。
+- **不認得的欄位一律報錯**（多半是打錯字），訊息帶路徑與可用欄位，例如 `manifest scenes[1]：不認得的欄位 txt`。
+- 每個場景的 `clip` 擇一給 `asset_id`（vidgrab 的素材 id）或 `path`（本機檔案）；素材怎麼取得與裁切在渲染階段。
+
+```bash
+vidpipe validate shorts.json   # 只檢查，不呼叫 TTS：每個場景的分句、字數、粗估秒數
+vidpipe narrate shorts.json    # 逐句合成旁白 → 排時間軸 → 寫 work_dir/shorts/<id>/
+```
+
+### narrate 做什麼
+
+每個場景照這個節奏排：
+
+```
+場景開頭 ─ lead ─ 第一句 ─ gap ─ 第二句 ─ … ─ 最後一句 ─ tail ─ 場景結束
+```
+
+- **場景長度** = max(`min_duration`, 旁白結束 + `tail`)，**向上取整到整數幀**，所以每個場景的起點都落在幀邊界上，
+  逐場景渲染再串接不會累積誤差。沒有旁白的場景就是 `min_duration`。
+- **字幕時間**是每一句的絕對起訖秒數，來自實際合成出來的長度。
+- 總長超過 60 秒會在 `warnings` 提醒；超過 3 分鐘就不會被 YouTube 當成 Shorts。
+- 輸出在 `work_dir/shorts/<id>/`（放在 `shorts/` 底下，作品 id 叫 `cache` 也不會蓋到 TTS 快取）：
+
+| 檔案 | 內容 |
+| --- | --- |
+| `manifest.json` | 驗證過的原稿 |
+| `timeline.json` | 每個場景的幀數與起訖、每一句的起訖與英文、用的音色 |
+| `narration.wav` | 每句旁白擺在它的起點、其餘補靜音，長度等於整支片（24kHz 單聲道） |
+| `subs.srt`、`subs.ass` | 字幕（見下一節）；整支片都沒有旁白就不產生 |
+
+- `timeline.json` 與 `narration.wav` 對同一份 manifest 是逐位元組相同的（快取命中與否不寫進檔案），
+  檔案裡的句子音檔只寫檔名（在 `work_dir/cache/tts/`），所以換機器、換掛載點也還能用。
+- 整支片都沒有旁白（純音樂）也行：照 `min_duration` 排時間軸，不產生 `narration.wav` 與字幕。
+- 是長指令，會留下工作紀錄（`narrate`，帶 `short_id`），網頁看得到逐句進度。
+
+### 字幕：subs.srt 與 subs.ass
+
+`narrate` 順便把字幕檔也寫好——時間直接取自每一句旁白，所以字幕跟聲音對得上。
+改字幕的語言或樣式只要重跑 `narrate`（旁白走快取，不會再呼叫 TTS）。
+
+- `subs.srt`：給播放器或上傳；`subs.ass`：燒進影片用（解析度與輸出一致，字級、邊距、描邊都已定好）。
+- **一個畫面最多兩行中文**。太長的句子（40 字大約 3 行）會在逗號附近分成幾頁，每頁的顯示時間依字數比例分配。
+- **折行**（中文沒有空白可斷，所以自己折）：優先在逗號、頓號後面斷、兩行盡量一樣長；避頭尾（`，。！？」` 不開頭、`「（` 不結尾）；
+  英文與數字不從單字中間斷開。
+- **雙語**（`"subtitles": {"langs": "zh-TW+en"}`）：中文在上、英文在下（較小、淡黃）。句子分頁時英文依各頁中文字數分配，
+  盡量切在英文的逗號處。**沒寫 `en` 的句子只顯示中文**，`warnings` 會告訴你有幾句、在哪些場景。
+  只寫 `zh-TW` 時，就算有 `en` 也不顯示。
+- **停留**：聲音結束後多停 0.15 秒（不超過下一句開始），太短的句子至少顯示 0.4 秒；任兩條字幕不重疊。
+- **位置**：放在底部，並留出 Shorts 介面（標題、頻道名）會蓋住的空間——直式離底邊 20%、橫式 8%（這是估計值，
+  各版本的介面不完全一樣）。字級與每行字數都以輸出的短邊為準：9:16 約 65px、每行 14 個中文字。
+- 字體用設定的 `subtitle_font`。**字體裝不到時 libass 會換成別的字體，中文可能變方塊**——Docker 映像已裝 Noto CJK；
+  Mac 請把 `VIDPIPE_SUBTITLE_FONT` 設成裝得到的繁中字體（例如 `PingFang TC`）。
+
 ## 工作紀錄：jobs／job／cancel
 
-`normalize`、`trim`、`fill`、`concat`、`speak`（之後的渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
+`normalize`、`trim`、`fill`、`concat`、`speak`、`narrate`（之後的渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
 **不管是從終端機、API 還是 MCP 發起的**，網頁的「工作」頁都看得到。輸出的 JSON 多一個 `job`（記錄關掉時是 `null`）。
 
 ```bash
