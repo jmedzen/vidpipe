@@ -17,11 +17,25 @@ vidpipe 是 Shorts 流水線：腳本 → 旁白與字幕 → 素材 → 9:16 �
 - **9:16 與統一編碼屬於這個 repo**，不要塞回 vidgrab（vidgrab 只負責找與取）。
 - 祕密（token、API key）只進環境變數；`vidpipe config` 一律遮蔽，測試要驗證不外洩。
 
+## 網頁介面
+
+`vidpipe serve`：標準庫 `ThreadingHTTPServer`（`server.py`）＋ React 19／TypeScript／Vite（`web/`），
+做法跟 vidgrab 一致。規劃見使用者專案的 `vidpipe-web-ui-plan.md`。
+
+- **前端產物進版控**：`npm run build` 輸出到 `src/vidpipe/static/`，pip 與 Docker 直接帶著走，使用者不需要 node。
+  改了 `web/`（`src/`、`index.html`、`public/`）一定要 `cd web && npm run build`；
+  CI 的 `tools/check_frontend.sh` 會比對 `static/.build-stamp`，忘了 build 就紅。
+- **防護不能漏**：新增寫入類端點（POST／PUT／DELETE）走 `Handler._write`，Host 白名單、token、Origin 檢查已經在入口；
+  `/file/*` 之類讀檔路由一律用 `relative_to` 比目錄層級（不要用字串前綴），並補 `..`／同前綴目錄的測試。
+- 外殼的 CSP 是 `script-src 'self'`：**不要在 `index.html` 寫 inline script**（要在 paint 前做的事放 `web/public/`）。
+- 前端 PR 要附 Playwright 截圖（深色與淺色各一張、窄螢幕一張），自己先看過。
+
 ## 開發
 
 ```bash
 pip install -e ".[dev]"
 ruff check . && pytest -q
+cd web && npm ci && npm run build      # 只有動到前端才需要
 ```
 
 測試必須離線：ffmpeg 用合成影片，TTS 與 vidgrab 用假伺服器。
