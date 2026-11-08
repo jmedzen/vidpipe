@@ -3,6 +3,8 @@
 vidgrab 的契約（見它的 README「給 AI agent 用」）：
 - `GET /api/find/<id>`：asset id（`pixabay:123`）或片段 id（`pixabay:123#2-8`）→
   `{project, item, clip?}`；找不到回 404。
+- `POST /api/search`：關鍵字 → `{job}`；工作做完 `result.project` 是新建的專案名稱，
+  `GET /api/vault?project=<名稱>` 取回它的候選（每支有授權、時長、寬高、出處）。
 - `POST /api/batch`：對專案裡的某支素材抓指定區段，**冪等**（同一個區段抓過就不再抓，
   `new_clips` 為空）、`wait: true` 在請求裡等到做完。
 - `GET /file/<專案>/<路徑>`：取檔（支援 Range）；跨機器、容器時用這個，不要用 `path`。
@@ -40,6 +42,28 @@ class VidgrabClient(HttpClient):
             if exc.status == 404:
                 return None
             raise
+
+    def search(self, keywords: list[str], *, platform: str = "stock",
+               orientation: str = "portrait", per_keyword: int = 8, timeout: float = 300.0,
+               poll: float = 2.0) -> dict[str, Any]:
+        """去 vidgrab 搜新素材，回 `{"project": 專案名, "candidates": [...]}`（依 vidgrab 的排序）。
+
+        每個候選：`id`、`title`、`author`、`license`（`kind`／`label`）、`duration`、`width`、
+        `height`、`webpage_url`、`credit_hint`。
+        """
+        body = {"keywords": keywords, "platform": platform, "orientation": orientation,
+                "per_keyword": per_keyword}
+        started = self.request("POST", "/api/search", json=body, timeout=60).json()
+        job = started.get("job")
+        if not job:
+            raise UpstreamError("vidgrab 沒有回搜尋工作的 id", upstream="vidgrab")
+        result = self._wait_job(str(job), timeout, poll)
+        project = result.get("project")
+        if not project:
+            raise UpstreamError("vidgrab 的搜尋結果沒有專案名稱", upstream="vidgrab")
+        summary = self.get_json(
+            "/api/vault?" + urllib.parse.urlencode({"project": project}), timeout=60)
+        return {"project": project, "candidates": list(summary.get("items") or [])}
 
     def grab(self, project: str, asset_id: str, start: float, end: float, *,
              timeout: float = 900.0, poll: float = 2.0) -> dict[str, Any]:

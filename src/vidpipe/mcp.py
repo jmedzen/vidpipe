@@ -31,11 +31,13 @@ SUPPORTED_PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 DEFAULT_WAIT = 60.0
 MAX_WAIT = 600.0
 POLL = 0.5
+STEPS = ("narrate", "render", "cover", "credits")     # run_step 能做的單一步驟
 
 INSTRUCTIONS = (
     "做 YouTube Short：先 manifest_guide 看 manifest 怎麼寫 → validate_manifest 檢查 → "
     "make_short 一次做完（旁白、時間軸、渲染、封面、credits）→ get_short 取成品網址。"
-    "素材用 vidgrab 的 asset id 或本機路徑；"
+    "素材用 vidgrab 的 asset id 或本機路徑；還沒挑素材就先 plan_short（場景給英文 query，"
+    "它去搜、依授權與長度與方向挑好，回完整 manifest 與備選）。"
     "回傳的 warnings 要看（素材循環、授權未明、封面沒做成…）。"
 )
 
@@ -51,6 +53,9 @@ GUIDE_TAIL = """
   `duck_under_voice` 讓旁白出聲時自動壓低音樂。
 - 成片自動標準化到 -14 LUFS，同時產出封面（`cover.at`、`cover.text`）與素材來源清單 credits.md。
 - 不認得的欄位一律報錯（多半是打錯字），訊息帶路徑，例如 `scenes[1].txt`。
+- 還沒挑素材：場景給 `query`（英文關鍵字效果最好）代替 `clip`，音樂給 `music.query`，
+  用 plan_short 交給 vidpipe 挑；回來的 `manifest` 可直接 make_short，`report` 列出每個場景
+  挑了誰、為什麼、前幾名備選（想換就改 `asset_id`）。
 - 流程：validate_manifest（不呼叫 TTS）→ make_short。
   只想調整某一步：run_step（narrate／render／cover／credits）。
 """
@@ -74,6 +79,15 @@ TOOLS: list[dict[str, Any]] = [
      "description": "檢查 manifest（不呼叫 TTS、不碰素材）：回每個場景的分句、字數與粗估長度；"
                     "寫錯會回錯誤，帶欄位路徑（例如 scenes[1].txt）。",
      "inputSchema": _obj({"manifest": _MANIFEST}, ["manifest"])},
+    {"name": "plan_short",
+     "description": "草稿 → 搜尋並挑素材與音樂 → 可以直接 make_short 的 manifest。"
+                    "草稿就是 manifest，只是場景可以用 query（搜尋關鍵字，英文最好）代替 clip，"
+                    "music 也可以給 query。規則：授權明確優先、長度夠、直式優先；"
+                    "結果的 report 列出選擇與備選。只搜尋，不呼叫 TTS、不下載。",
+     "inputSchema": _obj({"manifest": {"type": "object",
+                                       "description": "草稿：manifest 加上 query、search，"
+                                                      "見 manifest_guide"},
+                          "wait": _WAIT}, ["manifest"])},
     {"name": "make_short",
      "description": "一次做完：合成旁白 → 排時間軸 → 渲染成 9:16 mp4 → 封面 → credits.md。"
                     "一支片同時只能有一個工作。回 job 與 short（檔案網址）；"
@@ -84,7 +98,7 @@ TOOLS: list[dict[str, Any]] = [
                     "render（用 narrate 的結果渲染）、"
                     "cover（重做封面，可帶 at 秒數與 text 標題）、credits（重做素材來源清單）。"
                     "改過 manifest 要先 narrate 再 render；改封面或清單不必重新渲染。",
-     "inputSchema": _obj({"op": {"type": "string", "enum": list(shorts.OPS[1:])},
+     "inputSchema": _obj({"op": {"type": "string", "enum": list(STEPS)},
                           "manifest": _MANIFEST,
                           "at": {"type": "number",
                                  "description": "cover 用：取第幾秒的畫面"},
@@ -175,14 +189,18 @@ def _launch(op: str, args: dict[str, Any]) -> Any:
     return _outcome(cfg, info["job"], wait)
 
 
+def _tool_plan_short(args: dict[str, Any]) -> Any:
+    return _launch("plan", args)
+
+
 def _tool_make_short(args: dict[str, Any]) -> Any:
     return _launch("make", args)
 
 
 def _tool_run_step(args: dict[str, Any]) -> Any:
     op = args.get("op")
-    if op not in ("narrate", "render", "cover", "credits"):
-        raise BadInput(f"op 不認得：{op!r}", hint="narrate、render、cover、credits 其中一個")
+    if op not in STEPS:
+        raise BadInput(f"op 不認得：{op!r}", hint=f"{'、'.join(STEPS)} 其中一個")
     return _launch(op, args)
 
 
@@ -229,6 +247,7 @@ REPORT_ONLY = frozenset({"check_setup"})
 HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "manifest_guide": _tool_manifest_guide,
     "validate_manifest": _tool_validate_manifest,
+    "plan_short": _tool_plan_short,
     "make_short": _tool_make_short,
     "run_step": _tool_run_step,
     "get_job": _tool_get_job,

@@ -177,6 +177,46 @@ def cmd_make(args: argparse.Namespace) -> int:
         short_id=manifest.id)
 
 
+def _plan_input(args: argparse.Namespace) -> Any:
+    """`.json`（或內容以 `{` 開頭）是草稿 manifest；其他當純文字腳本。"""
+    from . import planner
+
+    text = _read_script(args)
+    if str(args.script).endswith(".json") or text.lstrip().startswith("{"):
+        try:
+            return json.loads(text)
+        except ValueError as exc:
+            raise BadInput(f"草稿不是合法的 JSON：{exc}") from exc
+    if not args.id:
+        raise BadInput("純文字腳本要用 --id 指定作品 id",
+                       hint="例：vidpipe plan script.txt --id taipei-night-01")
+    return planner.parse_script(text, short_id=args.id, title=args.title or "")
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """草稿 → 去 vidgrab 搜尋、挑素材與音樂 → 可以直接 make 的 manifest（不呼叫 TTS、不下載）。"""
+    from . import planner
+
+    cfg = config_mod.load()
+    doc = _plan_input(args)
+    overrides = {k: v for k, v in (("platform", args.platform), ("orientation", args.orientation),
+                                   ("allow_unknown_license", args.allow_unknown_license or None))
+                 if v is not None}
+    if overrides and isinstance(doc, dict):
+        doc = {**doc, "search": {**(doc.get("search") or {}), **overrides}}
+    req = planner.parse_request(doc, cfg)          # 先驗證：寫錯就不開工作
+
+    def run() -> dict[str, Any]:
+        result = planner.run(req, cfg)
+        planner.store_result(cfg, req.manifest.id, result)
+        if args.out:
+            result["path"] = str(planner.write_manifest(args.out, result["manifest"]))
+        return result
+
+    return _recorded("plan", {"id": req.manifest.id, "scenes": len(req.manifest.scenes)}, run,
+                     summary=planner.summarize, short_id=req.manifest.id)
+
+
 def cmd_credits(args: argparse.Namespace) -> int:
     from . import render
 
@@ -357,6 +397,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("manifest", help="manifest JSON 檔")
     p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.mp4")
     p.set_defaults(func=cmd_make)
+
+    p = sub.add_parser("plan", help="草稿（場景可以只寫 query）→ 搜尋並挑素材與音樂 → manifest")
+    p.add_argument("script", help="草稿 .json，或純文字腳本（空白行隔開場景）；- 讀 stdin")
+    p.add_argument("--id", help="作品 id（純文字腳本必填）")
+    p.add_argument("--title", help="標題（純文字腳本用）")
+    p.add_argument("-o", "--out", help="把挑好的 manifest 另存成這個檔案")
+    p.add_argument("--platform", help="stock（預設）、pexels、pixabay、bilibili、youtube、both")
+    p.add_argument("--orientation", help="portrait（預設）、landscape、square、any")
+    p.add_argument("--allow-unknown-license", action="store_true",
+                   help="授權不明或要確認的素材也考慮（會留警告）")
+    p.set_defaults(func=cmd_plan, text=None)
 
     p = sub.add_parser("cover", help="用最近一次渲染的畫面重做封面（改 at 或標題不用重新渲染）")
     p.add_argument("manifest", help="manifest JSON 檔（要先跑過 render）")
