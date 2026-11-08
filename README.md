@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂與響度都能用了（`narrate` → `render` 就得到一支成片）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`；封面與 credits 在後續 PR。
+> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`cover`、`credits`。
 
 ## 快速開始
 
@@ -94,7 +94,8 @@ agent 寫一份 JSON，`validate`／`narrate`／`render` 都只讀它；同一�
     {"id": "s3", "min_duration": 2.0}
   ],
   "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
-  "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true}
+  "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true},
+  "cover": {"at": 1.0, "text": "台北夜市"}
 }
 ```
 
@@ -186,6 +187,7 @@ narration.wav ──────────────┴─ 編成 AAC ──
   （`mute_source: false` 目前會警告後仍靜音，環境音混音在後續 PR）。沒有旁白也沒有音樂的片會有一軌靜音，方便上傳與串接。
 - **出處**：`work_dir/shorts/<id>/sources.json`（`vidpipe.sources/1`）記下每個場景用了哪個素材、作者、授權與
   `credit_hint`，之後的 credits 用它。vidgrab 的授權分類不是 `free`／`free-attribution` 的素材，`warnings` 會提醒公開前先確認。
+- 成片旁邊一併產出封面與素材來源清單（見下一節）。
 - 是長指令，會留下工作紀錄（`render`，階段 `assets`／`segments`／`audio`／`mux`，帶 `short_id`）。
 
 ### 背景音樂與響度
@@ -206,6 +208,29 @@ m4a；取檔規則跟影片素材一樣，只要 `start` 起算、整支片那�
 - 沒有旁白、只有音樂（純音樂短片）也行：照 `min_duration` 排時間軸，音樂就是整支片的聲音（沒有東西可壓，所以不 ducking）。
 - 音樂的出處與授權跟素材一樣記進 `sources.json` 的 `music`；授權不是 `free`／`free-attribution` 時 `warnings` 會提醒
   （vidgrab 的音樂庫只收 CC0、公共領域、CC BY，CC BY 要在說明欄標註作者）。
+
+### 封面與素材來源清單
+
+`render` 在 `<成片名>.mp4` 旁邊多產出兩個檔案（`-o` 換了名字它們跟著換）：
+
+| 檔案 | 內容 |
+| --- | --- |
+| `<名>.cover.jpg` | 封面：成片裡的一格，疊上標題；尺寸同成片（9:16 = 1080×1920） |
+| `<名>.credits.md` | 素材來源與授權：每個影片素材與背景音樂的作者、授權、連結，以及可以直接貼進說明欄的文字 |
+
+- **封面**取自還沒燒字幕的場景片段，所以標題不會跟字幕疊在一起。manifest 的 `cover.at` 指定取第幾秒（預設 1 秒，
+  短片取中間）；標題預設用 `title`，`cover.text` 可以另外寫，寫 `""` 就不放字。標題用跟字幕同一套字體與折行
+  （`subtitle_font`），放在上緣 18% 的位置，最多三行。封面做不成（例如 `at` 超過影片長度）只會在 `warnings` 提醒，不會丟掉成片。
+- **credits.md**：同一個素材用在好幾個場景只列一次。授權 `free-attribution`（例如 CC BY）標「**必須標註**」；vidgrab 無法確定授權
+  （`check`／`unknown`）或本機檔案標 ⚠️，公開前先確認。輸出的 `credits` 欄位摘要：`attribution_required`、`unclear`。
+- 想只改封面或重做清單，不必重新渲染：
+
+```bash
+vidpipe cover shorts.json --at 3 --text "新標題"   # 用最近一次渲染的畫面重做封面
+vidpipe credits shorts.json                         # 重做 credits.md
+```
+
+  這兩個指令會確認最近一次渲染就是現在這份 manifest；不是的話回 `bad_input`，提示先 `narrate`／`render`。
 
 ## 工作紀錄：jobs／job／cancel
 

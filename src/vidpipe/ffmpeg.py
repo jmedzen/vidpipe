@@ -91,6 +91,12 @@ def run(args: list[str], *, timeout: float = 600.0, duration: float | None = Non
     rec.progress(1.0)
 
 
+def filter_value(path: str) -> str:
+    """路徑 → ffmpeg 濾鏡參數裡能安全使用的寫法（空白、冒號、單引號、逗號、括號都可以）。"""
+    level1 = path.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+    return "'" + level1.replace("'", "'\\''") + "'"
+
+
 def run_stderr(args: list[str], *, timeout: float = 600.0) -> str:
     """跑一次 ffmpeg 並回傳它的訊息輸出（stderr）。
 

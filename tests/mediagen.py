@@ -44,8 +44,9 @@ def color_clip(path, colors: Sequence[str], *, seg: float = 1.0, size: str = "32
 def pixel(path, x: int, y: int, at: float = 0.0) -> tuple[int, int, int]:
     """取 at 秒那一格的某個像素（RGB）。"""
     info = ffmpeg.probe(path)
+    seek = ["-ss", f"{at:.3f}"] if at > 0 else []     # 單張圖片不能 -ss
     raw = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", str(path), "-frames:v", "1",
+        ["ffmpeg", "-v", "error", *seek, "-i", str(path), "-frames:v", "1",
          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
     off = (y * info["width"] + x) * 3
     return raw[off], raw[off + 1], raw[off + 2]
@@ -121,7 +122,8 @@ def font_name() -> str:
 
 def bright_rows(video, at: float, width: int, height: int) -> list[int]:
     """這一格裡有「亮色（字）」的橫列，用來看字幕出現在畫面的哪個高度。"""
+    seek = ["-ss", f"{at:.3f}"] if at > 0 else []     # 單張圖片不能 -ss
     raw = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", str(video), "-frames:v", "1",
+        ["ffmpeg", "-v", "error", *seek, "-i", str(video), "-frames:v", "1",
          "-vf", "format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
     return [y for y in range(height) if any(v > 200 for v in raw[y * width:(y + 1) * width])]
