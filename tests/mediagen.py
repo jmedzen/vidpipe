@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import array
+import shutil
 import subprocess
 from collections.abc import Sequence
 
@@ -56,3 +58,43 @@ def dominant(rgb: tuple[int, int, int]) -> str:
     if top < 120 or sorted(rgb)[-2] > top * 0.5:
         return "?"
     return "rgb"[rgb.index(top)]
+
+
+# ------------------------------------------------------------------ 看成片裡有什麼
+
+def count_frames(path) -> int:
+    """影像軌實際解出幾幀（不信 metadata）。"""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+         "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True).stdout
+    return int(out.strip())
+
+
+def peak(path, start: float, length: float) -> int:
+    """音訊在 [start, start+length] 這段的最大振幅（16-bit；沒有音訊軌就是 0）。"""
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", str(path),
+         "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+        capture_output=True, check=True).stdout
+    return max((abs(v) for v in array.array("h", raw)), default=0)
+
+
+def has_cjk_font() -> bool:
+    if not shutil.which("fc-list"):
+        return False
+    out = subprocess.run(["fc-list", ":lang=zh"], capture_output=True, text=True).stdout
+    return bool(out.strip())
+
+
+def font_name() -> str:
+    out = subprocess.run(["fc-list", ":lang=zh", "family"], capture_output=True, text=True).stdout
+    return out.splitlines()[0].split(",")[0].strip()
+
+
+def bright_rows(video, at: float, width: int, height: int) -> list[int]:
+    """這一格裡有「亮色（字）」的橫列，用來看字幕出現在畫面的哪個高度。"""
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", str(video), "-frames:v", "1",
+         "-vf", "format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+    return [y for y in range(height) if any(v > 200 for v in raw[y * width:(y + 1) * width])]

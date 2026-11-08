@@ -59,6 +59,14 @@ def fake_server():
     server.close()
 
 
+@pytest.fixture
+def second_server():
+    """第二個假服務（例如同一個測試裡 TTS 與 vidgrab 各一個）。"""
+    server = FakeServer()
+    yield server
+    server.close()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_env(tmp_path, monkeypatch):
     """別讓開發機的 VIDPIPE_* 環境變數或 cwd 裡的 vidpipe.json 影響測試。"""

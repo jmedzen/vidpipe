@@ -163,6 +163,19 @@ def cmd_narrate(args: argparse.Namespace) -> int:
         short_id=manifest.id)
 
 
+def cmd_render(args: argparse.Namespace) -> int:
+    from . import render
+
+    raw, manifest, cfg = _load_manifest(args.manifest)
+    return _recorded(
+        "render", {"manifest": args.manifest, "scenes": len(manifest.scenes),
+                   "output": args.output},
+        lambda: render.run(manifest, raw, cfg, args.output),
+        summary=lambda o: {k: o[k] for k in ("short_id", "path", "duration", "size_bytes",
+                                             "warnings")},
+        short_id=manifest.id)
+
+
 def cmd_normalize(args: argparse.Namespace) -> int:
     from . import video
 
@@ -304,6 +317,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("narrate", help="照 manifest 合成旁白並排時間軸（旁白音軌、場景長度）")
     p.add_argument("manifest", help="manifest JSON 檔")
     p.set_defaults(func=cmd_narrate)
+
+    p = sub.add_parser("render", help="照 manifest 與 narrate 的結果渲染成片（mp4）")
+    p.add_argument("manifest", help="manifest JSON 檔（要先跑過 narrate）")
+    p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.mp4")
+    p.set_defaults(func=cmd_render)
 
     p = sub.add_parser("jobs", help="工作紀錄清單（新的在前）")
     p.add_argument("--status", help="running／succeeded／failed／cancelled／interrupted")

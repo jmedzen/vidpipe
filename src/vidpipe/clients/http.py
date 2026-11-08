@@ -73,7 +73,7 @@ class HttpClient:
                 last = UpstreamError(
                     f"{self.name} 回 HTTP {resp.status_code}：{detail}".rstrip("：").rstrip(),
                     upstream=self.name, upstream_code=str(err.get("code") or ""),
-                    hint=hint, retryable=retryable)
+                    status=resp.status_code, hint=hint, retryable=retryable)
                 if not retryable:
                     raise last
             if attempt < self.retries:
