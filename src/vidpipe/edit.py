@@ -152,7 +152,7 @@ def check_uniform(infos: Sequence[dict[str, Any]], *, copy: bool = False) -> Non
                 hint="每一支先用 `vidpipe normalize` 轉成同一規格再串接")
 
 
-def _list_line(path: str) -> str:
+def list_line(path: str) -> str:
     return "file '" + str(Path(path).resolve()).replace("'", "'\\''") + "'\n"
 
 
@@ -170,7 +170,7 @@ def concat(inputs: Sequence[str | Path], dest: str | Path, *, copy: bool = False
     listing = dest.with_name(f".{dest.stem}.list.txt")
     try:
         if copy:
-            listing.write_text("".join(_list_line(i["path"]) for i in infos), encoding="utf-8")
+            listing.write_text("".join(list_line(i["path"]) for i in infos), encoding="utf-8")
             args = ["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy",
                     "-movflags", "+faststart", str(tmp)]
         else:

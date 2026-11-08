@@ -107,11 +107,18 @@ def audio_filter(spec: OutputSpec, duration: float, keep: bool) -> tuple[list[st
         "[1:a]anull[a]"
 
 
-def encode_args(spec: OutputSpec) -> list[str]:
-    """所有輸出共用的編碼參數。normalize、trim、concat 都用這一份，規格才會一致。"""
+def video_encode_args(spec: OutputSpec) -> list[str]:
     return ["-c:v", "libx264", "-preset", spec.preset, "-crf", str(spec.crf),
-            "-c:a", "aac", "-b:a", spec.audio_bitrate, "-ar", str(spec.audio_rate), "-ac", "2",
-            "-video_track_timescale", str(spec.fps * 512)]
+            "-pix_fmt", "yuv420p", "-video_track_timescale", str(spec.fps * 512)]
+
+
+def audio_encode_args(spec: OutputSpec) -> list[str]:
+    return ["-c:a", "aac", "-b:a", spec.audio_bitrate, "-ar", str(spec.audio_rate), "-ac", "2"]
+
+
+def encode_args(spec: OutputSpec) -> list[str]:
+    """所有輸出共用的編碼參數。normalize、trim、concat、render 都用這一份，規格才會一致。"""
+    return [*video_encode_args(spec), *audio_encode_args(spec)]
 
 
 def normalize(src: str | Path, dest: str | Path, spec: OutputSpec | None = None, *,

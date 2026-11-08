@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import tempfile
@@ -28,7 +29,7 @@ from typing import Any
 
 from . import ffmpeg, jobs, narration, subtitles
 from .config import Config
-from .errors import BadInput, UpstreamError
+from .errors import BadInput, NotFound, UpstreamError
 from .manifest import Manifest
 from .narration import Clip
 
@@ -241,6 +242,30 @@ def _atomic_json(path: Path, data: Any) -> None:
     _atomic_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
+def fingerprint(manifest: Manifest, raw: Any, cfg: Config) -> str:
+    """這份 timeline 是從什麼算出來的：manifest 原稿加上會影響結果的有效設定。
+
+    `render` 用它確認 timeline.json 沒有過期（manifest 或音色、字幕設定改了就要重跑 narrate）。
+    """
+    effective = {"manifest": raw, "voice": {"model": cfg.tts_model, "voice_ref": cfg.voice_ref,
+                                            "reference_text": cfg.reference_text},
+                 "subtitles": {"langs": manifest.subtitles.langs, "style": manifest.subtitles.style,
+                               "burn_in": manifest.subtitles.burn_in, "font": cfg.subtitle_font}}
+    text = json.dumps(effective, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def load(cfg: Config, short_id: str) -> dict[str, Any]:
+    """讀 `narrate` 寫的 timeline.json；沒有就請使用者先跑 narrate。"""
+    path = short_dir(cfg, short_id) / "timeline.json"
+    if not path.is_file():
+        raise NotFound(f"還沒有 {short_id} 的時間軸", hint="先跑 `vidpipe narrate <manifest>`")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BadInput(f"timeline.json 壞了：{exc}", hint="重跑 `vidpipe narrate`") from exc
+
+
 def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
     """合成旁白 → 排時間軸 → 寫 `manifest.json`、`timeline.json`、`narration.wav`。
 
@@ -268,6 +293,7 @@ def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
         _atomic_text(root / SRT_FILE, subs.srt)
         _atomic_text(root / ASS_FILE, subs.ass)
     data = timeline.to_dict()
+    data["fingerprint"] = fingerprint(manifest, raw, cfg)
     data["warnings"] = warnings
     # 檔名而不是絕對路徑，理由同 Cue.to_dict
     data["narration"] = None if audio is None else {

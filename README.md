@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`（manifest、時間軸、字幕檔）；渲染在後續 PR。
+> 狀態：旁白、時間軸、字幕、素材取得、渲染都能用了（`narrate` → `render` 就得到一支成片）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`；背景音樂、封面與 credits 在後續 PR。
 
 ## 快速開始
 
@@ -76,7 +76,7 @@ vidpipe speak script.txt --out-dir wavs   # 另外複製成 001.wav、002.wav…
 
 ## manifest：宣告式描述一支片
 
-agent 寫一份 JSON，`validate`／`narrate`／（之後的）`render` 都只讀它；同一份 manifest 重跑得到同一支片。
+agent 寫一份 JSON，`validate`／`narrate`／`render` 都只讀它；同一份 manifest 重跑得到同一支片。
 
 ```json
 {
@@ -102,7 +102,7 @@ agent 寫一份 JSON，`validate`／`narrate`／（之後的）`render` 都只�
   沒有旁白的場景要給 `min_duration`（秒，最長 120）。
 - `voice` 寫了就蓋過設定檔與環境變數（寫空字串 = 明確要伺服器預設）；`subtitles` 沒寫的欄位用設定檔的 `subtitle_langs`／`burn_subtitles`。
 - **不認得的欄位一律報錯**（多半是打錯字），訊息帶路徑與可用欄位，例如 `manifest scenes[1]：不認得的欄位 txt`。
-- 每個場景的 `clip` 擇一給 `asset_id`（vidgrab 的素材 id）或 `path`（本機檔案）；素材怎麼取得與裁切在渲染階段。
+- 每個場景的 `clip` 擇一給 `asset_id`（vidgrab 的素材 id）或 `path`（本機檔案）；素材怎麼取得與裁切見下面的 `render`。
 
 ```bash
 vidpipe validate shorts.json   # 只檢查，不呼叫 TTS：每個場景的分句、字數、粗估秒數
@@ -126,7 +126,7 @@ vidpipe narrate shorts.json    # 逐句合成旁白 → 排時間軸 → 寫 wor
 | 檔案 | 內容 |
 | --- | --- |
 | `manifest.json` | 驗證過的原稿 |
-| `timeline.json` | 每個場景的幀數與起訖、每一句的起訖與英文、用的音色 |
+| `timeline.json` | 每個場景的幀數與起訖、每一句的起訖與英文、用的音色、`fingerprint`（`render` 用它確認沒有過期） |
 | `narration.wav` | 每句旁白擺在它的起點、其餘補靜音，長度等於整支片（24kHz 單聲道） |
 | `subs.srt`、`subs.ass` | 字幕（見下一節）；整支片都沒有旁白就不產生 |
 
@@ -152,6 +152,40 @@ vidpipe narrate shorts.json    # 逐句合成旁白 → 排時間軸 → 寫 wor
   各版本的介面不完全一樣）。字級與每行字數都以輸出的短邊為準：9:16 約 65px、每行 14 個中文字。
 - 字體用設定的 `subtitle_font`。**字體裝不到時 libass 會換成別的字體，中文可能變方塊**——Docker 映像已裝 Noto CJK；
   Mac 請把 `VIDPIPE_SUBTITLE_FONT` 設成裝得到的繁中字體（例如 `PingFang TC`）。
+
+## render：照 manifest 渲染成片
+
+```bash
+vidpipe narrate shorts.json     # 先有旁白、時間軸與字幕
+vidpipe render shorts.json      # → out/<id>.mp4（-o 指定輸出檔）
+```
+
+```
+每個場景：取素材 → 裁切、補長、重構圖 → 無聲、剛好 N 幀的片段（有快取）
+片段們 ── 串接（不重編碼）──┬─ 燒字幕（重編碼）或直接複製影像
+narration.wav ──────────────┴─ 編成 AAC ──→ out/<id>.mp4
+```
+
+- **素材**（`clip`）有兩種寫法：
+  - `{"path": "/a/b.mp4", "start": 3}`：本機檔，`start` 是檔案裡的第幾秒。
+  - `{"asset_id": "pixabay:123", "start": 3}`：vidgrab 的素材，`start` 是**整支影片**的第幾秒。
+    vidpipe 只向 vidgrab 要 `start` 到 `start + 場景長度` 這一段（多留 0.5 秒），不下載整支；
+    素材庫裡已經有涵蓋這一段的片段（或整支）就直接用，不重抓（vidgrab 的批次本來就是冪等的）。
+    asset id 也可以是片段 id（`pixabay:123#2-8`）：那個檔案本身就是裁好的片段，`start` 改成相對於片段檔的開頭。
+  - vidgrab 跟 vidpipe 在同一台機器、檔案讀得到時直接用那個路徑；不同機器或容器就走 `/file/...` 下載到
+    `work_dir/cache/assets/`。要設定 `VIDPIPE_VIDGRAB_URL`（與需要時的 `VIDPIPE_VIDGRAB_TOKEN`）。
+- **場景長度由 `narrate` 的時間軸決定**（整數幀），片段是精確的幀數，串接是 `-c copy`，所以聲音與畫面不會漂移。
+  素材不夠長就循環補長（只循環 `start` 之後的部分）；沒有 `clip` 的場景是黑畫面。兩者都會寫進 `warnings`。
+- **重跑只做改過的**：每個場景片段的檔名帶內容雜湊（素材檔、起點、幀數、輸出規格、`fit`、`focus`），
+  沒動的場景直接用快取（結果裡 `scenes[].cached`），改過的舊片段在結束時清掉。中間檔在 `work_dir/shorts/<id>/render/`。
+- **不會用過期的旁白渲染**：`render` 會檢查 `timeline.json` 是不是從現在這份 manifest（加上音色、字幕設定）算出來的；
+  改過就回 `bad_input`（exit 2），提示重跑 `narrate`（沒改的句子走快取，很快）。還沒跑過 `narrate` 則回 `not_found`。
+- **字幕**：`subtitles.burn_in` 為 true 就燒進畫面（重編碼一次）；false 就把 `.srt` 放在 mp4 旁邊（同檔名）。
+- **聲音**：只有旁白；素材原本的聲音一律靜音（`mute_source: false` 目前會警告後仍靜音，環境音混音在後續 PR）。
+  沒有旁白的片會有一軌靜音，方便上傳與串接。
+- **出處**：`work_dir/shorts/<id>/sources.json`（`vidpipe.sources/1`）記下每個場景用了哪個素材、作者、授權與
+  `credit_hint`，之後的 credits 用它。vidgrab 的授權分類不是 `free`／`free-attribution` 的素材，`warnings` 會提醒公開前先確認。
+- 是長指令，會留下工作紀錄（`render`，階段 `assets`／`segments`／`mux`，帶 `short_id`）。
 
 ## 工作紀錄：jobs／job／cancel
 

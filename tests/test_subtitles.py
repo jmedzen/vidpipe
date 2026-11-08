@@ -6,7 +6,7 @@ import shutil
 import subprocess
 
 import pytest
-from mediagen import make
+from mediagen import bright_rows, font_name, has_cjk_font, make
 from tlhelp import clips_for, parse
 from ttsfake import FakeTTS
 
@@ -300,47 +300,22 @@ def test_subtitle_files_are_identical_on_rerun_and_follow_the_manifest_font(
 # ------------------------------------------------------------------ 真的燒進畫面（要繁中字體）
 
 
-def _has_cjk_font() -> bool:
-    if not shutil.which("fc-list"):
-        return False
-    out = subprocess.run(["fc-list", ":lang=zh"], capture_output=True, text=True).stdout
-    return bool(out.strip())
-
-
-def _font_name() -> str:
-    out = subprocess.run(["fc-list", ":lang=zh", "family"], capture_output=True, text=True).stdout
-    return out.splitlines()[0].split(",")[0].strip()
-
-
-def _frame_rows(video, at: float, width: int, height: int) -> list[int]:
-    """這一格裡有「亮色（字）」的橫列，用來看字幕出現在畫面的哪個高度。"""
-    raw = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", str(video), "-frames:v", "1",
-         "-vf", "format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
-    rows = []
-    for y in range(height):
-        row = raw[y * width:(y + 1) * width]
-        if any(v > 200 for v in row):
-            rows.append(y)
-    return rows
-
-
 @needs_ffmpeg
-@pytest.mark.skipif(not _has_cjk_font(), reason="需要 libass 與一個繁中字體")
+@pytest.mark.skipif(not has_cjk_font(), reason="需要 libass 與一個繁中字體")
 def test_burned_in_subtitles_land_in_the_bottom_area_clear_of_the_shorts_overlay(tmp_path):
     spec = OutputSpec(width=540, height=960)  # 縮小一半讓測試快；版面按比例
     tl, subs = build_for([{"id": "a", "text": "台北的夜晚，從一碗熱湯開始，一路吃到天亮。"}],
-                         [2.0], spec=spec, font=_font_name())
+                         [2.0], spec=spec, font=font_name())
     ass = tmp_path / "subs.ass"
     ass.write_text(subs.ass, encoding="utf-8")
     src = make(tmp_path / "bg.mp4", "color=c=0x202020:s=540x960", audio=False, seconds=3)
     out = tmp_path / "out.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", f"ass={ass}",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)], check=True)
-    rows = _frame_rows(out, 1.0, 540, 960)
+    rows = bright_rows(out, 1.0, 540, 960)
     assert rows, "字幕沒有出現在畫面上"
     lay = subtitles.layout_for(spec)
     assert max(rows) < 960 - lay.margin_bottom + 5      # 最底的字離底邊至少 20%
     assert min(rows) > 960 * 0.5                         # 在畫面下半部，不是亂跑
-    assert not _frame_rows(out, 0.02, 540, 960)          # 聲音還沒開始時沒有字
+    assert not bright_rows(out, 0.02, 540, 960)          # 聲音還沒開始時沒有字
     assert re.search(r"-->", subs.srt)
