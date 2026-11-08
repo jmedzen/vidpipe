@@ -176,6 +176,26 @@ def cmd_render(args: argparse.Namespace) -> int:
         short_id=manifest.id)
 
 
+def cmd_credits(args: argparse.Namespace) -> int:
+    from . import render
+
+    raw, manifest, cfg = _load_manifest(args.manifest)
+    return _recorded("credits", {"manifest": args.manifest, "output": args.output},
+                     lambda: render.write_credits(manifest, raw, cfg, args.output),
+                     short_id=manifest.id)
+
+
+def cmd_cover(args: argparse.Namespace) -> int:
+    from . import render
+
+    raw, manifest, cfg = _load_manifest(args.manifest)
+    return _recorded("cover", {"manifest": args.manifest, "output": args.output,
+                               "at": args.at, "text": args.text},
+                     lambda: render.write_cover(manifest, raw, cfg, args.output, at=args.at,
+                                                text=args.text),
+                     short_id=manifest.id)
+
+
 def cmd_normalize(args: argparse.Namespace) -> int:
     from . import video
 
@@ -322,6 +342,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("manifest", help="manifest JSON 檔（要先跑過 narrate）")
     p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.mp4")
     p.set_defaults(func=cmd_render)
+
+    p = sub.add_parser("cover", help="用最近一次渲染的畫面重做封面（改 at 或標題不用重新渲染）")
+    p.add_argument("manifest", help="manifest JSON 檔（要先跑過 render）")
+    p.add_argument("--at", type=float, help="取第幾秒的畫面；預設用 manifest 的 cover.at 或 1 秒")
+    p.add_argument("--text", help="封面標題；空字串 = 不放字；預設用 cover.text，再沒有就用 title")
+    p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.cover.jpg")
+    p.set_defaults(func=cmd_cover)
+
+    p = sub.add_parser("credits", help="重做素材來源與授權清單（credits.md）")
+    p.add_argument("manifest", help="manifest JSON 檔（要先跑過 render）")
+    p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.credits.md")
+    p.set_defaults(func=cmd_credits)
 
     p = sub.add_parser("jobs", help="工作紀錄清單（新的在前）")
     p.add_argument("--status", help="running／succeeded／failed／cancelled／interrupted")

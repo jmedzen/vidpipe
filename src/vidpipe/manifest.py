@@ -18,7 +18,8 @@ agent 寫（或之後由 `plan` 產生）一份 JSON，`narrate`、`render` 都�
         {"id": "s3", "min_duration": 2.0}                  // 沒有旁白的場景要給最短長度
       ],
       "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
-      "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true}
+      "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true},
+      "cover": {"at": 1.0, "text": "台北夜市"}            // 選填；text 預設用 title，"" 不放字
     }
 
 一個 scene 的旁白可以給 `text`（自動分句）或 `sentences`（明確列出每一句，雙語字幕要配對英文時用）。
@@ -86,6 +87,7 @@ class Manifest:
     timing: Timing = field(default_factory=Timing)
     subtitles: Subtitles = field(default_factory=Subtitles)
     music: dict[str, Any] | None = None
+    cover: dict[str, Any] | None = None   # {"at": 秒, "text": 標題}，都是選填
 
 
 # ------------------------------------------------------------------ 欄位檢查小工具
@@ -190,8 +192,9 @@ def _parse_scene(raw: Any, i: int, *, max_chars: int) -> Scene:
 def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
           max_chars: int = text_mod.DEFAULT_MAX_CHARS) -> Manifest:
     """dict → Manifest。`subtitle_langs`、`burn_in` 是 manifest 沒寫時的預設（來自設定）。"""
-    top = _obj(data, "（最上層）", {"schema", "id", "title", "output", "voice", "timing", "scenes",
-                                   "subtitles", "music"}, {"schema", "id", "scenes"})
+    top = _obj(data, "（最上層）",
+               {"schema", "id", "title", "output", "voice", "timing", "scenes", "subtitles",
+                "music", "cover"}, {"schema", "id", "scenes"})
     if top["schema"] != SCHEMA:
         raise _fail("schema", f"要是 {SCHEMA!r}（收到 {top['schema']!r}）")
     mid = _str(top["id"], "id")
@@ -229,6 +232,12 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
                      if k in ("volume", "start")
                      else _bool(v, "music.duck_under_voice")) for k, v in m.items()}
 
+    cover = None
+    if top.get("cover") is not None:
+        c = _obj(top["cover"], "cover", {"at", "text"})
+        cover = {k: (_num(v, "cover.at", hi=36000) if k == "at"
+                     else _str(v, "cover.text", allow_empty=True)) for k, v in c.items()}
+
     raw_scenes = top["scenes"]
     if not isinstance(raw_scenes, list) or not raw_scenes:
         raise _fail("scenes", "要是非空的清單")
@@ -239,7 +248,7 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
             raise _fail(f"scenes[{i}].id", f"{sc.id!r} 重複了")
         seen.add(sc.id)
     title = _str(top.get("title", ""), "title", allow_empty=True)
-    return Manifest(mid, scenes, title, spec, aspect, voice, timing, subtitles, music)
+    return Manifest(mid, scenes, title, spec, aspect, voice, timing, subtitles, music, cover)
 
 
 def read_json(path: str | Path) -> Any:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 from mediagen import (
@@ -316,6 +317,102 @@ def test_a_music_file_without_sound_or_missing_is_refused_with_the_music_path(
     assert err["code"] == "not_found" and "music" in err["message"]
 
 
+# ------------------------------------------------------------------ 封面與素材來源清單
+
+def red_then_blue(clips, **top):
+    return manifest([{"id": "a", "min_duration": 2.0, "clip": {"path": str(clips["red"])}},
+                     {"id": "b", "min_duration": 2.0, "clip": {"path": str(clips["blue"])}}],
+                    **top)
+
+
+def test_render_writes_a_cover_and_a_credits_file_beside_the_video(env, clips):
+    env.narrate(red_then_blue(clips))
+    result = env.render()["output"]
+    cover = Path(result["cover"]["path"])
+    assert cover == Path(result["path"]).with_name("r1.cover.jpg") and cover.is_file()
+    info = ffmpeg.probe(cover)
+    assert (info["width"], info["height"]) == (1080, 1920)
+    assert result["cover"]["at"] == 1.0 and result["cover"]["text"] is None   # 沒有 title
+    assert dominant(pixel(cover, *CENTER)) == "r"
+    credits = Path(result["credits"]["path"])
+    assert credits == Path(result["path"]).with_name("r1.credits.md")
+    assert "本機檔案" in credits.read_text(encoding="utf-8")
+    assert result["credits"]["unclear"] == [str(clips["red"].resolve()),
+                                            str(clips["blue"].resolve())]
+
+
+def test_cover_at_picks_the_frame(env, clips):
+    env.narrate(red_then_blue(clips, cover={"at": 3.0}))
+    result = env.render()["output"]
+    assert result["cover"]["at"] == 3.0
+    assert dominant(pixel(result["cover"]["path"], *CENTER)) == "b"
+
+
+@pytest.mark.skipif(not has_cjk_font(), reason="需要 libass 與一個繁中字體")
+def test_cover_title_defaults_to_the_manifest_title_and_sits_in_the_upper_part(
+        env, clips, monkeypatch):
+    monkeypatch.setenv("VIDPIPE_SUBTITLE_FONT", font_name())
+    env.narrate(red_then_blue(clips, title="台北夜市：一碗熱湯開始，一路吃到天亮"))
+    result = env.render()["output"]
+    assert result["cover"]["text"] == "台北夜市：一碗熱湯開始，一路吃到天亮"
+    rows = bright_rows(result["cover"]["path"], 0.0, 1080, 1920)
+    assert rows and 1920 * 0.1 < min(rows) and max(rows) < 1920 * 0.45
+    assert len(rows) > 100                                  # 折成兩三行，不是一條細線
+    env.narrate(red_then_blue(clips, title="台北夜市", cover={"text": ""}))   # 空字串 = 不放字
+    again = env.render()["output"]
+    assert again["cover"]["text"] is None
+    assert not bright_rows(again["cover"]["path"], 0.0, 1080, 1920)
+
+
+def test_cover_command_redoes_only_the_cover_from_the_last_render(env, clips):
+    env.narrate(red_then_blue(clips))
+    result = env.render()["output"]
+    video, before = Path(result["path"]), Path(result["path"]).stat().st_mtime_ns
+    out = env.cli("cover", str(env.manifest_path), "--at", "3", "--text", "")["output"]
+    assert out["path"] == result["cover"]["path"] and out["at"] == 3.0 and out["text"] is None
+    assert dominant(pixel(out["path"], *CENTER)) == "b"           # 換成後半段的畫面
+    assert video.stat().st_mtime_ns == before                      # 影片沒動
+    other = env.cli("cover", str(env.manifest_path), "-o", str(env.work.parent / "x.jpg"))
+    assert other["output"]["path"].endswith("x.jpg") and Path(other["output"]["path"]).is_file()
+
+
+def test_credits_command_rewrites_the_list_and_cover_command_checks_there_was_a_render(
+        env, clips):
+    env.narrate(red_then_blue(clips))
+    assert "render" in env.cli("cover", str(env.manifest_path), expect=2)["error"]["hint"]
+    assert "render" in env.cli("credits", str(env.manifest_path), expect=2)["error"]["hint"]
+    result = env.render()["output"]
+    path = Path(result["credits"]["path"])
+    path.unlink()
+    out = env.cli("credits", str(env.manifest_path))["output"]
+    assert out["path"] == str(path) and path.is_file() and out["unclear"]
+    elsewhere = env.work.parent / "deliver" / "c.md"
+    assert env.cli("credits", str(env.manifest_path), "-o", str(elsewhere))["ok"]
+    assert elsewhere.is_file()
+
+
+def test_cover_and_credits_commands_refuse_a_render_from_an_older_manifest(env, clips):
+    data = red_then_blue(clips)
+    env.narrate(data)
+    env.render()
+    data["scenes"][0]["min_duration"] = 3.0
+    env.narrate(data)                    # 時間軸更新了，但還沒重新渲染
+    for command in ("cover", "credits"):
+        err = env.cli(command, str(env.manifest_path), expect=2)["error"]
+        assert err["code"] == "bad_input" and "render" in err["hint"]
+    data["scenes"][0]["min_duration"] = 2.5
+    env.write(data)                      # manifest 又改了，連 narrate 都還沒跑
+    assert "narrate" in env.cli("cover", str(env.manifest_path), expect=2)["error"]["hint"]
+
+
+def test_a_cover_that_cannot_be_made_only_warns_and_the_video_is_still_delivered(env, clips):
+    env.narrate(red_then_blue(clips, cover={"at": 99}))
+    result = env.render()["output"]
+    assert result["cover"] is None and Path(result["path"]).is_file()
+    assert len(result["warnings"]) == 1 and "封面沒做成" in result["warnings"][0]
+    assert Path(result["credits"]["path"]).is_file()
+
+
 # ------------------------------------------------------------------ vidgrab 素材
 
 @pytest.fixture
@@ -348,6 +445,9 @@ def test_an_asset_clip_asks_vidgrab_for_only_the_needed_range_and_is_reused_next
     assert entry["scene"] == "a" and entry["offset"] == 0
     assert entry["source"]["asset_id"] == "pixabay:1"
     assert entry["source"]["author"] == "Ann" and entry["source"]["credit_hint"]
+    credits = Path(result["credits"]["path"]).read_text(encoding="utf-8")
+    assert "「Night market」— Ann" in credits and "Ann（Pixabay）" in credits
+    assert result["credits"]["attribution_required"] == [] and result["credits"]["unclear"] == []
 
     again = env.render()["output"]
     assert len(vg.batches) == 1 and len(vg.downloads) == 1     # 沒有重抓、沒有重下載

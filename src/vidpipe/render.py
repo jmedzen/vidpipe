@@ -15,7 +15,7 @@
 - `render` 會檢查 timeline.json 是不是從**現在這份** manifest（加上音色、字幕設定）算出來的；
   改過就要求先重跑 `narrate`，不會用過期的旁白與字幕默默渲染出錯的片。
 - 中間檔留在 `work_dir/shorts/<id>/render/`，方便除錯。`sources.json` 記下每個場景用了哪個素材、
-  出處與授權，之後 credits 用它。
+  出處與授權；成片旁邊一併產出 `<名>.credits.md`（素材來源與說明欄範本）、`<名>.cover.jpg`（封面）。
 """
 
 from __future__ import annotations
@@ -27,21 +27,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import assets, edit, ffmpeg, jobs, mix, timeline
+from . import assets, cover, credits, edit, ffmpeg, jobs, mix, timeline
 from .assets import Resolved
 from .config import Config
-from .errors import BadInput
+from .errors import BadInput, VidpipeError
+from .ffmpeg import filter_value
 from .manifest import Manifest, Scene
 from .video import OutputSpec, audio_encode_args, video_encode_args, video_filter
 
 SEGMENT_VERSION = "seg-v1"
 SAFE_LICENSES = ("free", "free-attribution")   # vidgrab 的授權分類；其餘（check／unknown）要提醒
-
-
-def filter_value(path: str) -> str:
-    """路徑 → ffmpeg 濾鏡參數裡能安全使用的寫法（空白、冒號、單引號、逗號、括號都可以）。"""
-    level1 = path.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
-    return "'" + level1.replace("'", "'\\''") + "'"
 
 
 @dataclass(frozen=True)
@@ -158,14 +153,66 @@ def _license_warning(label: str, credit: dict[str, Any]) -> str | None:
             f"{credit.get('credit_hint', '')}").rstrip("：；")
 
 
-def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None, *,
-        make_client=assets.make_client, timeout: float = 900.0) -> dict[str, Any]:
-    """照 manifest 渲染成片，回結果（輸出檔、每個場景用了什麼、warnings）。"""
-    tl = timeline.load(cfg, manifest.id)
+def _write_text(path: Path, text: str) -> None:
+    tmp = path.with_name(f".{path.stem}.partial{path.suffix}")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _check_timeline(tl: dict[str, Any], manifest: Manifest, raw: Any, cfg: Config) -> None:
     if tl.get("fingerprint") != timeline.fingerprint(manifest, raw, cfg):
         raise BadInput(
             "timeline.json 不是從現在這份 manifest 算出來的（manifest、音色或字幕設定改過）",
             hint="重跑 `vidpipe narrate <manifest>`；沒改的句子走快取，很快")
+
+
+def _rendered(manifest: Manifest, raw: Any, cfg: Config) -> tuple[dict[str, Any], dict[str, Any]]:
+    """最近一次渲染留下的 (timeline, sources)；要跟現在的 manifest 對得上，否則請重跑。"""
+    tl = timeline.load(cfg, manifest.id)
+    _check_timeline(tl, manifest, raw, cfg)
+    path = timeline.short_dir(cfg, manifest.id) / "sources.json"
+    try:
+        sources = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        sources = {}
+    if sources.get("fingerprint") != tl["fingerprint"]:
+        raise BadInput("還沒有渲染過這一版 manifest", hint="先跑 `vidpipe render <manifest>`")
+    return tl, sources
+
+
+def default_sibling(cfg: Config, manifest: Manifest, suffix: str) -> Path:
+    return Path(cfg.out_dir) / f"{manifest.id}{suffix}"
+
+
+def write_credits(manifest: Manifest, raw: Any, cfg: Config,
+                  out: str | Path | None = None) -> dict[str, Any]:
+    """最近一次渲染的 `credits.md`（單獨重做用；`render` 本來就會產出）。"""
+    _, sources = _rendered(manifest, raw, cfg)
+    dest = Path(out) if out else default_sibling(cfg, manifest, ".credits.md")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    text, summary = credits.build(manifest.id, manifest.title, sources)
+    _write_text(dest, text)
+    return {"short_id": manifest.id, "path": str(dest), **summary}
+
+
+def write_cover(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None, *,
+                at: float | None = None, text: str | None = None) -> dict[str, Any]:
+    """用最近一次渲染的場景片段重做封面（改 `at` 或標題不用重新渲染）。"""
+    tl, _ = _rendered(manifest, raw, cfg)
+    dest = Path(out) if out else default_sibling(cfg, manifest, ".cover.jpg")
+    info = cover.make(manifest, cfg, timeline.short_dir(cfg, manifest.id) / "render" /
+                      "segments.txt", tl["total"], dest, at=at, text=text)
+    return {"short_id": manifest.id, **info}
+
+
+def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None, *,
+        make_client=assets.make_client, timeout: float = 900.0) -> dict[str, Any]:
+    """照 manifest 渲染成片，回結果（輸出檔、每個場景用了什麼、warnings）。"""
+    tl = timeline.load(cfg, manifest.id)
+    _check_timeline(tl, manifest, raw, cfg)
     spec = manifest.output
     if tl["fps"] != spec.fps or len(tl["scenes"]) != len(manifest.scenes):
         raise BadInput("timeline.json 跟 manifest 的場景對不上", hint="重跑 `vidpipe narrate`")
@@ -246,9 +293,20 @@ def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None
     music_source = None if music is None else {
         "offset": music.offset, "looped": bool((audio.info.get("music") or {}).get("looped")),
         "source": music.credit}
-    (root / "sources.json").write_text(json.dumps(
-        {"schema": "vidpipe.sources/1", "short_id": manifest.id, "scenes": sources,
-         "music": music_source}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    sources_doc = {"schema": "vidpipe.sources/1", "short_id": manifest.id,
+                   "fingerprint": tl["fingerprint"], "scenes": sources, "music": music_source}
+    _write_text(root / "sources.json", json.dumps(sources_doc, ensure_ascii=False, indent=2) + "\n")
+
+    # 隨成片附上的：素材來源清單與封面。封面做不成不該丟掉已經完成的影片，只提醒
+    credits_path = dest.with_name(f"{dest.stem}.credits.md")
+    credits_text, credits_summary = credits.build(manifest.id, manifest.title, sources_doc)
+    _write_text(credits_path, credits_text)
+    cover_info: dict[str, Any] | None = None
+    try:
+        cover_info = cover.make(manifest, cfg, listing, tl["total"],
+                                dest.with_name(f"{dest.stem}.cover.jpg"), timeout=timeout)
+    except VidpipeError as exc:
+        warnings.append(f"封面沒做成：{exc.message}")
 
     info = ffmpeg.probe(dest)
     audio_info = dict(audio.info)
@@ -259,6 +317,7 @@ def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None
     return {"short_id": manifest.id, "path": str(dest), "duration": info["duration"],
             "width": info["width"], "height": info["height"], "fps": info["fps"],
             "size_bytes": dest.stat().st_size, "burned_subtitles": burn, "audio": audio_info,
+            "cover": cover_info, "credits": {"path": str(credits_path), **credits_summary},
             "srt": str(srt_path) if srt_path else None,
             "scenes": [{"id": s.id, "frames": seg.frames, "looped": seg.looped,
                         "cached": seg.cached,

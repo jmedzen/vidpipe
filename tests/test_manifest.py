@@ -150,6 +150,16 @@ def test_subtitle_defaults_come_from_config_and_manifest_overrides_them():
     fails(doc(subtitles={"burn_in": "yes"}), "subtitles.burn_in")
 
 
+def test_cover_takes_an_optional_time_and_title():
+    assert manifest.parse(doc()).cover is None
+    assert manifest.parse(doc(cover={"at": 2.5, "text": "標題"})).cover == {
+        "at": 2.5, "text": "標題"}
+    assert manifest.parse(doc(cover={"text": ""})).cover == {"text": ""}   # 空字串 = 不放字
+    fails(doc(cover={"at": -1}), "cover.at")
+    fails(doc(cover={"text": 3}), "cover.text")
+    fails(doc(cover={"title": "x"}), "cover")
+
+
 def test_music_needs_one_source_and_valid_values():
     m = manifest.parse(doc(music={"asset_id": "pixabay:9", "volume": 0.12,
                                   "duck_under_voice": True}))
