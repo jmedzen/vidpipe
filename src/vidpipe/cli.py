@@ -27,6 +27,15 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from . import doctor
+
+    skip = [x.strip() for x in (args.skip or "").split(",") if x.strip()]
+    result = doctor.run(config_mod.load(), skip=skip)
+    emit(result)
+    return 0 if result["ok"] else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vidpipe",
@@ -37,6 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("version", help="版本與 build number（JSON）").set_defaults(func=cmd_version)
     sub.add_parser("config", help="目前生效的設定（祕密遮蔽）").set_defaults(func=cmd_config)
+    p = sub.add_parser("doctor", help="檢查 ffmpeg、vidgrab、TTS 是否都就緒（JSON）")
+    p.add_argument("--skip", help="略過的項目，逗號分隔（例如 vidgrab,tts）")
+    p.set_defaults(func=cmd_doctor)
     return parser
 
 
