@@ -62,3 +62,25 @@ def test_an_untitled_short_uses_its_id_and_no_sources_says_so():
     text, summary = build([("s1", None)], title="")
     assert text.startswith("# 素材來源與授權：night-01")
     assert "沒有用到外部素材" in text and summary["assets"] == 0
+
+
+def test_the_short_summary_counts_assets_and_the_licences_that_need_a_look(tmp_path):
+    import json
+
+    from vidpipe import shorts
+    from vidpipe.config import Config
+
+    cfg = Config(work_dir=str(tmp_path / "work"), out_dir=str(tmp_path / "out"))
+    root = tmp_path / "work" / "shorts" / "night-01"
+    root.mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({"title": "台北夜市", "scenes": [{}, {}]}),
+                                        encoding="utf-8")
+    assert shorts.summarize(cfg, "night-01")["credits"] is None        # 還沒渲染過
+    sources = {"scenes": [
+        {"scene": "s1", "source": asset(kind="free-attribution")},
+        {"scene": "s2", "source": asset("pixabay:2", kind="check")},
+        {"scene": "s3", "source": {"kind": "file", "path": "/a/b/clip.mp4"}}],
+        "music": {"offset": 0, "looped": False, "source": asset("jamendo:1", kind="unknown")}}
+    (root / "sources.json").write_text(json.dumps(sources), encoding="utf-8")
+    assert shorts.summarize(cfg, "night-01")["credits"] == {
+        "assets": 4, "attribution_required": 1, "unclear": 3}

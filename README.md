@@ -7,7 +7,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 渲染：ffmpeg（9:16 重構圖、統一編碼、字幕、混音）
 - 給 AI agent 用：CLI（stdout 只有 JSON）、HTTP API、MCP（stdio 與 HTTP 兩種）；
   完整做法見 [docs/agent-recipe.md](docs/agent-recipe.md)
-- 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
+- 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、每支片做到哪、預覽成品、進度與工作紀錄
 
 > 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`plan`（交給 vidpipe 挑素材）、`cover`、`credits`；HTTP API 也能送件與取成品；`mcp` 讓 Claude Code 之類的 client 直接用。
 
@@ -313,9 +313,15 @@ vidpipe serve                      # http://127.0.0.1:8320，會開預設瀏覽�
 vidpipe serve --port 8080
 ```
 
-目前有三頁：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查，失敗時顯示原因與 hint；
-下方是最近的工作）、**工作**（每個長指令的狀態、進度條、階段、參數、結果、事件記錄、失敗原因，進行中的可以取消）、
-**設定**（目前生效的設定，token 遮蔽）。作品列表、成品預覽隨後續 PR 加入，規劃見 `vidpipe-web-ui-plan.md`。
+目前有四頁：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查，失敗時顯示原因與 hint；
+下方是最近的工作）、**作品**（每支片做到哪、長度、有幾個素材的授權要確認；點進去有成品播放器、
+每個場景與每句旁白的時間——點句子就跳到那一秒、素材與授權（含可以直接複製的說明欄範本）、檔案、manifest、
+這支片的工作；最近一次失敗會直接講原因）、**工作**（每個長指令的狀態、進度條、階段、參數、結果、
+事件記錄、失敗原因，進行中的可以取消）、**設定**（目前生效的設定，token 遮蔽）。
+貼腳本、重做與換素材隨後續 PR 加入，規劃見 `vidpipe-web-ui-plan.md`。
+
+想先看看畫面又不想動真資料：`python tools/make_fixture.py /tmp/vp-fixture` 會用假 TTS 與合成素材做出四支片
+（做完的、有一個授權要確認的、只有旁白的、渲染失敗的），照它印出的指令 `vidpipe serve` 就能看。
 
 API（皆為 JSON，錯誤格式同 CLI）：
 
