@@ -323,12 +323,16 @@ vidpipe serve --port 8080
 （`POST /api/plan`）。「挑素材」分頁列出每個場景選了什麼、為什麼、有哪些備選與提醒；沒問題就按「做成片」
 （`POST /api/make`，旁白、素材、已渲染的場景都走快取，所以失敗後按「重跑」只會補做缺的）。
 「刪除」會清掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑時不能刪。
-換單一場景的素材、改旁白文字隨後續 PR 加入，規劃見 `vidpipe-web-ui-plan.md`。
+**改一支做好的片**：「場景」分頁的「編輯場景」可以改標題、每個場景的旁白（`text` 或逐句的中英文）、畫面適配（`fit`）、
+素材從第幾秒開始、最短秒數、背景音樂的音量與壓低設定，也能把場景或音樂換成 plan 留下的備選（或直接輸入素材 id）。
+按「儲存」才寫回 manifest（`PUT /api/short/{id}/manifest`）；這時 manifest 比成片新，頁面會提示並把按鈕變成
+「重新做（套用修改）」——旁白與場景有快取，只有改到的部分會重做。編輯期間別的視窗、agent 或重新挑素材改了
+manifest，儲存會被擋下（`stale_manifest`），不會蓋掉對方。以向 vidgrab 搜尋、看縮圖的方式換素材，見 `vidpipe-web-ui-plan.md` 的 W6。
 
 想先看看畫面又不想動真資料：`python tools/make_fixture.py /tmp/vp-fixture` 會用假 TTS 與合成素材做出四支片
 （做完的、有一個授權要確認的、只有旁白的、渲染失敗的），照它印出的指令 `vidpipe serve` 就能看。
 加 `--serve` 會讓假服務繼續開著並直接開網頁（預設 http://127.0.0.1:8320），「新增作品 → 挑素材 → 做成片
-→ 刪除」整條路都能點；`--tts-delay 2` 讓每句旁白多等 2 秒，才看得到進行中的進度條與取消。
+→ 編輯 → 重新做 → 刪除」整條路都能點；`--tts-delay 2` 讓每句旁白多等 2 秒，才看得到進行中的進度條與取消。
 
 API（皆為 JSON，錯誤格式同 CLI）：
 
@@ -343,7 +347,8 @@ API（皆為 JSON，錯誤格式同 CLI）：
 | POST | `/api/validate` | 檢查 manifest（本體 `{"manifest": {…}}`）；等同 `vidpipe validate` |
 | POST | `/api/make`／`narrate`／`render`／`cover`／`credits`／`plan` | 送出工作（本體 `{"manifest": {…}}`，`cover` 另可帶 `at`、`text`，`plan` 的 `manifest` 是[草稿](#plan交給-vidpipe-挑素材)，也可以改給純文字腳本 `{"script": "…", "id": "…", "title"?, "music"?, "allow_unknown_license"?}`）；回 **202** 與 `job` |
 | GET | `/api/shorts` | 所有作品：階段（`new`／`planned`／`narrated`／`rendered`）、長度、素材與授權的數量（`credits`）、檔案、最近一個工作 |
-| GET | `/api/short/{id}` | 單一作品：manifest（與它的來源 `manifest_source`：`manifest`／`plan`／`draft`）、plan 的挑選報告（`plan`）、時間軸摘要、素材出處、檔案、最近的工作 |
+| GET | `/api/short/{id}` | 單一作品：manifest（與它的來源 `manifest_source`：`manifest`／`plan`／`draft`）、`manifest_revision`、`outdated`（manifest 比上次做出來的新：`true` 要重做、`false` 是最新、`null` 還沒做過）、plan 的挑選報告（`plan`）、時間軸摘要、素材出處、檔案、最近的工作 |
+| PUT | `/api/short/{id}/manifest` | 改 manifest：body `{"manifest": {...}, "revision": "<manifest_revision>"}`。驗證過才寫入；`revision` 已經不是現在那份（別的視窗、agent 或重新 plan 改過）回 409 `stale_manifest`；作品 id 改不了；有工作在跑回 409。改完 `POST /api/make` 只會重做改到的旁白與場景 |
 | DELETE | `/api/short/{id}` | 刪掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑回 409 |
 | GET | `/file/{id}/{out\|work}/{檔名}` | 成品（`out`：mp4、封面、credits、srt）與中間檔（`work`）；支援 `Range` |
 

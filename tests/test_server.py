@@ -26,6 +26,10 @@ class Running:
         kw.setdefault("allow_redirects", False)
         return requests.post(self.base + path, timeout=10, **kw)
 
+    def put(self, path, **kw):
+        kw.setdefault("allow_redirects", False)
+        return requests.put(self.base + path, timeout=10, **kw)
+
     def delete(self, path, **kw):
         kw.setdefault("allow_redirects", False)
         return requests.delete(self.base + path, timeout=10, **kw)

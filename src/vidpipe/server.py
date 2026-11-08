@@ -53,7 +53,8 @@ LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
 # 結構化錯誤 code ↔ HTTP 狀態（跟 CLI 的 code 同一套）
 ERROR_STATUS = {
     "bad_input": 400, "unauthorized": 401, "forbidden": 403, "not_found": 404,
-    "method_not_allowed": 405, "conflict": 409, "clip_too_short": 400, "cancelled": 409,
+    "method_not_allowed": 405, "conflict": 409, "stale_manifest": 409, "clip_too_short": 400,
+    "cancelled": 409,
     "upstream_error": 502, "dependency_missing": 503, "timeout": 504,
     "bad_config": 500, "render_failed": 500, "internal": 500,
 }
@@ -299,6 +300,12 @@ class Handler(BaseHTTPRequestHandler):
                 work_dir = config_mod.load().work_dir
                 self._json({"ok": True, "job": jobs_mod.request_cancel(work_dir, parts[2]),
                             "signalled": True})
+            elif (self.command == "PUT" and len(parts) == 4 and parts[:2] == ["api", "short"]
+                  and parts[3] == "manifest"):
+                body = self._body()
+                self._json({"ok": True, **shorts_mod.update_manifest(
+                    config_mod.load(), urllib.parse.unquote(parts[2]), body.get("manifest"),
+                    body.get("revision"))})
             elif self.command == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "short"]:
                 self._json({"ok": True, **shorts_mod.delete(
                     config_mod.load(), urllib.parse.unquote(parts[2]))})

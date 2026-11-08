@@ -91,7 +91,7 @@ export function NewShortPage() {
           <p className="muted small">不填就不放音樂。</p>
         </div>
 
-        <div className="field check">
+        <div className="field tick">
           <input id="ns-unknown" type="checkbox" checked={allowUnknown}
                  onChange={(e) => setAllowUnknown(e.target.checked)} />
           <label htmlFor="ns-unknown">

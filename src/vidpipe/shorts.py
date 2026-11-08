@@ -8,10 +8,13 @@ CLI（`validate`、`make`）、HTTP API 與之後的 MCP 共用這一層，三�
   做好的那一套，所以不需要另一個工作佇列；伺服器重開也不會弄丟正在跑的工作。
 - `summarize`／`detail`／`resolve_file`：看狀態與取檔。只認白名單裡的檔名，路徑跳脫不可能。
 - `delete`：刪掉一支片的中間檔與成品（共用的旁白快取不動）。
+- `update_manifest`：網頁編輯後寫回 manifest；`revision` 防止蓋掉別人剛改的
+  （別的視窗、agent、新的 plan）。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -142,6 +145,37 @@ def resolve_file(cfg: Config, short_id: str, area: str, name: str) -> tuple[Path
     return path, FILE_TYPES.get(path.suffix, "application/octet-stream")
 
 
+class StaleManifest(jobs.Conflict):
+    """編輯時的 revision 已經不是現在的 manifest：不蓋掉對方，請呼叫端重新載入。"""
+
+    code = "stale_manifest"
+
+
+def revision_of(doc: Any) -> str | None:
+    """manifest 內容的短雜湊：編輯時帶回來，內容已經變了就知道不能直接蓋掉。"""
+    if not isinstance(doc, dict):
+        return None
+    text = json.dumps(doc, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _outdated(cfg: Config, doc: Any, source: str | None, tl: Any, sources: Any) -> bool | None:
+    """manifest（或音色、字幕設定）比上次做出來的新嗎——也就是要不要重做。
+
+    還沒做過旁白、或 manifest 讀不懂就回 None。時間軸已經重算、成片還是舊的也算過期；
+    還沒有成片（只做了旁白）就沒有東西過期。
+    """
+    if not isinstance(tl, dict) or source not in ("manifest", "plan") or doc is None:
+        return None
+    try:
+        manifest, effective = parse_document(doc, cfg)
+    except VidpipeError:
+        return None
+    if tl.get("fingerprint") != timeline.fingerprint(manifest, doc, effective):
+        return True
+    return isinstance(sources, dict) and sources.get("fingerprint") != tl.get("fingerprint")
+
+
 def _stage(files: list[dict[str, Any]]) -> str:
     names = {f["name"] for f in files}
     if any(n.endswith(".mp4") for n in names):
@@ -239,6 +273,8 @@ def detail(cfg: Config, short_id: str) -> dict[str, Any]:
     manifest, source = _current_manifest(root)
     plan = _read_json(root / planner.PLAN_FILE)
     return {**summary, "manifest": manifest, "manifest_source": source,
+            "manifest_revision": revision_of(manifest),
+            "outdated": _outdated(cfg, manifest, source, tl, sources),
             "plan": plan.get("report") if isinstance(plan, dict) else None,
             "timeline": None if tl is None else {
                 "total": tl.get("total"), "total_frames": tl.get("total_frames"),
@@ -298,6 +334,33 @@ def draft_from_body(body: dict[str, Any]) -> dict[str, Any]:
                                title=text("title") or "")
     return planner.apply_options(doc, music=text("music"), allow_unknown_license=allow,
                                  platform=text("platform"), orientation=text("orientation"))
+
+
+def update_manifest(cfg: Config, short_id: str, doc: Any, revision: Any) -> dict[str, Any]:
+    """網頁編輯：驗證過就寫回 `manifest.json`（之後 `make` 只會重做改到的旁白與場景）。
+
+    `revision` 要是 `GET /api/short/<id>` 給的 `manifest_revision`；現在的 manifest 已經不是
+    那一份（有人改過、或重新 plan 過）就回 409，不蓋掉。作品 id 改不了；有工作在跑時不給改。
+    """
+    check_short_id(short_id)
+    root = timeline.short_dir(cfg, short_id)
+    if not root.is_dir():
+        raise NotFound(f"沒有這支片：{short_id}", hint="`GET /api/shorts` 列出所有作品")
+    current, source = _current_manifest(root)
+    if source not in ("manifest", "plan"):
+        raise BadInput("這支片還沒有可以改的 manifest", hint="先挑素材（plan），或 make 一次")
+    _assert_idle(cfg, short_id)
+    if not isinstance(revision, str) or not revision:
+        raise BadInput("缺少 revision", hint="用 `GET /api/short/<id>` 回的 manifest_revision")
+    if revision != revision_of(current):
+        raise StaleManifest("這份 manifest 已經被改過了（別的視窗、agent，或重新 plan 過）",
+                            hint="重新載入再改一次")
+    manifest, _ = parse_document(doc, cfg)
+    if manifest.id != short_id:
+        raise BadInput(f"manifest 的 id（{manifest.id}）要跟這支片一樣（{short_id}）",
+                       hint="作品 id 改不了")
+    timeline.store_manifest(cfg, short_id, doc)
+    return {"short_id": short_id, "manifest_revision": revision_of(doc)}
 
 
 def delete(cfg: Config, short_id: str) -> dict[str, Any]:

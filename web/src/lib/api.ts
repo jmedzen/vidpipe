@@ -48,6 +48,10 @@ export async function postJson<T>(path: string, body?: unknown, signal?: AbortSi
   return requestJson<T>(path, { method: 'POST', body }, signal)
 }
 
+export async function putJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: 'PUT', body }, signal)
+}
+
 export async function deleteJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return requestJson<T>(path, { method: 'DELETE' }, signal)
 }
