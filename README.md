@@ -7,7 +7,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 渲染：ffmpeg（9:16 重構圖、統一編碼、字幕、混音）
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 
-> 狀態：階段 1。目前有 `version`、`config`、`doctor`、`probe`、`normalize`；裁切串接、旁白、字幕依序在後續 PR。
+> 狀態：階段 1。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`；旁白、字幕依序在後續 PR。
 
 ## 快速開始
 
@@ -81,6 +81,24 @@ vidpipe normalize clip.mp4 -o out.mp4 --aspect 1:1 --audio silent
 
 輸出**一定有音軌**（原片沒聲音就補靜音），這樣後面串接、混音不需要分情況。輸出先寫到
 `.<name>.partial.mp4`，成功才改名，所以中斷不會留下半個成品。
+
+## trim／fill／concat：裁切、補長、串接
+
+輸入是 `normalize` 過的片段，輸出維持同一規格（`trim`／`fill` 沿用輸入的 fps，不會偷偷改）。
+
+```bash
+vidpipe trim in.mp4 -o out.mp4 --start 3 --duration 2.5   # 精準裁切；省略 --duration = 到尾
+vidpipe fill in.mp4 -o out.mp4 --duration 6 --start 3     # 湊成剛好 6 秒：夠長就裁，不夠就循環
+vidpipe fill in.mp4 -o out.mp4 --duration 6 --no-loop     # 不夠長就報 clip_too_short，換下一支素材
+vidpipe concat a.mp4 b.mp4 c.mp4 -o all.mp4               # 依序串接
+```
+
+- **裁切一律重編碼**，不用 `-c copy`：copy 只能切在關鍵幀上，素材關鍵幀稀疏時會差好幾秒。
+- **`fill` 的循環只循環 `--start` 之後的部分**（不會把起點前的內容混進來）。回傳多一個 `looped`。
+- **`concat` 先驗證規格一致**：尺寸、fps、取樣率、都要有音軌；不一致時指出是哪一支、差在哪，
+  並提示先 `normalize`。預設用 concat 濾鏡重編碼，接縫的音畫都準；`--copy` 走 demuxer，
+  不重編碼、零畫質損失，但 AAC 在接縫處可能有幾十毫秒誤差（另外要求編碼也完全一致）。
+- 素材不夠長（`clip_too_short`）與規格不一致都是 `bad_input` 類錯誤，exit code 2。
 
 ## 錯誤格式
 

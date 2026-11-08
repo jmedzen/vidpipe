@@ -107,6 +107,13 @@ def audio_filter(spec: OutputSpec, duration: float, keep: bool) -> tuple[list[st
         "[1:a]anull[a]"
 
 
+def encode_args(spec: OutputSpec) -> list[str]:
+    """所有輸出共用的編碼參數。normalize、trim、concat 都用這一份，規格才會一致。"""
+    return ["-c:v", "libx264", "-preset", spec.preset, "-crf", str(spec.crf),
+            "-c:a", "aac", "-b:a", spec.audio_bitrate, "-ar", str(spec.audio_rate), "-ac", "2",
+            "-video_track_timescale", str(spec.fps * 512)]
+
+
 def normalize(src: str | Path, dest: str | Path, spec: OutputSpec | None = None, *,
               fit: str = "blur_pad", focus: tuple[float, float] | str | None = None,
               audio: str = "keep", timeout: float = 900.0) -> dict[str, Any]:
@@ -127,9 +134,7 @@ def normalize(src: str | Path, dest: str | Path, spec: OutputSpec | None = None,
     tmp = dest.with_name(f".{dest.stem}.partial{dest.suffix}")
     args = ["-i", str(src), *extra_in,
             "-filter_complex", f"{vf};{af}", "-map", "[v]", "-map", "[a]",
-            "-c:v", "libx264", "-preset", spec.preset, "-crf", str(spec.crf),
-            "-c:a", "aac", "-b:a", spec.audio_bitrate, "-ar", str(spec.audio_rate), "-ac", "2",
-            "-video_track_timescale", str(spec.fps * 512),
+            *encode_args(spec),
             "-t", f"{info['duration']:.3f}",
             "-movflags", "+faststart", str(tmp)]
     try:
