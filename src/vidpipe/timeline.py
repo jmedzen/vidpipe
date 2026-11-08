@@ -266,6 +266,14 @@ def load(cfg: Config, short_id: str) -> dict[str, Any]:
         raise BadInput(f"timeline.json 壞了：{exc}", hint="重跑 `vidpipe narrate`") from exc
 
 
+def store_manifest(cfg: Config, short_id: str, raw: Any) -> Path:
+    """把驗證過的 manifest 原稿放進這支片的資料夾（`narrate` 與 HTTP 送件都走這裡）。"""
+    root = short_dir(cfg, short_id)
+    root.mkdir(parents=True, exist_ok=True)
+    _atomic_json(root / "manifest.json", raw)
+    return root / "manifest.json"
+
+
 def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
     """合成旁白 → 排時間軸 → 寫 `manifest.json`、`timeline.json`、`narration.wav`。
 
@@ -282,9 +290,7 @@ def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
     for message in warnings:
         jobs.log(message, "warning")
 
-    root = short_dir(cfg, manifest.id)
-    root.mkdir(parents=True, exist_ok=True)
-    _atomic_json(root / "manifest.json", raw)
+    root = store_manifest(cfg, manifest.id, raw).parent
     audio = write_narration(timeline, root / "narration.wav") if texts else None
     if audio is None:  # 上一版有旁白、這一版沒有：別留下過期的音軌與字幕
         for name in ("narration.wav", SRT_FILE, ASS_FILE):

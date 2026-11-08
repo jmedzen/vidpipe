@@ -130,24 +130,12 @@ def _load_manifest(path: str) -> tuple[Any, Any, Any]:
     return raw, manifest, manifest_mod.apply_voice(manifest, cfg)
 
 
-# 中文旁白大約每秒 4–5 字；只是排鏡頭長度時的粗估，實際以合成後的秒數為準
-_CHARS_PER_SECOND = 4.5
-
-
 def cmd_validate(args: argparse.Namespace) -> int:
     """只檢查 manifest（不呼叫 TTS、不碰素材）；回每個場景的分句與粗估長度。"""
+    from . import shorts
+
     _, manifest, _ = _load_manifest(args.manifest)
-    scenes = []
-    for scene in manifest.scenes:
-        chars = sum(len(s.text) for s in scene.sentences)
-        speech = chars / _CHARS_PER_SECOND
-        scenes.append({"id": scene.id, "sentences": [s.text for s in scene.sentences],
-                       "chars": chars, "min_duration": scene.min_duration,
-                       "estimated_seconds": round(max(scene.min_duration, speech), 1),
-                       "clip": scene.clip, "fit": scene.fit})
-    emit({"ok": True, "short_id": manifest.id, "scenes": scenes,
-          "estimated_seconds": round(sum(s["estimated_seconds"] for s in scenes), 1),
-          "estimate_note": f"以每秒 {_CHARS_PER_SECOND:g} 字粗估；實際長度以 narrate 的結果為準"})
+    emit({"ok": True, **shorts.describe(manifest)})
     return 0
 
 
@@ -176,12 +164,27 @@ def cmd_render(args: argparse.Namespace) -> int:
         short_id=manifest.id)
 
 
+def cmd_make(args: argparse.Namespace) -> int:
+    from . import shorts
+
+    raw, manifest, cfg = _load_manifest(args.manifest)
+    return _recorded(
+        "make", {"manifest": args.manifest, "scenes": len(manifest.scenes),
+                 "output": args.output, "model": cfg.tts_model or None},
+        lambda: shorts.make(manifest, raw, cfg, args.output),
+        summary=lambda o: {k: o[k] for k in ("short_id", "path", "duration", "size_bytes",
+                                             "warnings")},
+        short_id=manifest.id)
+
+
 def cmd_credits(args: argparse.Namespace) -> int:
     from . import render
 
     raw, manifest, cfg = _load_manifest(args.manifest)
     return _recorded("credits", {"manifest": args.manifest, "output": args.output},
                      lambda: render.write_credits(manifest, raw, cfg, args.output),
+                     summary=lambda o: {k: o[k] for k in ("short_id", "path", "assets",
+                                                          "attribution_required", "unclear")},
                      short_id=manifest.id)
 
 
@@ -193,6 +196,7 @@ def cmd_cover(args: argparse.Namespace) -> int:
                                "at": args.at, "text": args.text},
                      lambda: render.write_cover(manifest, raw, cfg, args.output, at=args.at,
                                                 text=args.text),
+                     summary=lambda o: {k: o[k] for k in ("short_id", "path", "at", "text")},
                      short_id=manifest.id)
 
 
@@ -342,6 +346,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("manifest", help="manifest JSON 檔（要先跑過 narrate）")
     p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.mp4")
     p.set_defaults(func=cmd_render)
+
+    p = sub.add_parser("make", help="一次做完：narrate + render（含封面與 credits）")
+    p.add_argument("manifest", help="manifest JSON 檔")
+    p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.mp4")
+    p.set_defaults(func=cmd_make)
 
     p = sub.add_parser("cover", help="用最近一次渲染的畫面重做封面（改 at 或標題不用重新渲染）")
     p.add_argument("manifest", help="manifest JSON 檔（要先跑過 render）")

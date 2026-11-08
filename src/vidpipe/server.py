@@ -1,6 +1,7 @@
 """網頁伺服器：標準庫 `ThreadingHTTPServer`，做法跟 vidgrab 一致。
 
-同一支程式提供網頁外殼、`/static/*`、REST API（JSON）。之後的 `/file/*`、`/mcp` 也掛在這裡。
+同一支程式提供網頁外殼、`/static/*`、REST API（JSON）、`/file/*`（成品與中間檔，支援 Range）。
+之後的 `/mcp` 也掛在這裡。
 
 安全（這個服務會呼叫 TTS、讀寫 work 目錄，不能裸奔）：
 - 預設只綁 127.0.0.1。綁到別的位址必須明講 `--allow-lan`，而且要設 `VIDPIPE_API_TOKEN`
@@ -21,6 +22,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import sys
 import threading
 import traceback
@@ -32,6 +34,7 @@ from typing import Any
 
 from . import config as config_mod
 from . import jobs as jobs_mod
+from . import shorts as shorts_mod
 from .errors import BadInput, VidpipeError, from_exception
 from .version import __version__, build, full_version
 
@@ -39,6 +42,8 @@ TOKEN_ENV = "VIDPIPE_API_TOKEN"
 TOKEN_COOKIE = "vidpipe_token"
 DEFAULT_PORT = 8320
 STATIC_DIR = Path(__file__).with_name("static")
+MAX_BODY = 4 * 1024 * 1024      # 一份 manifest 不會超過這麼大
+FILE_CHUNK = 1 << 20
 
 # 不需要 token 的路徑：外殼、版本（Docker healthcheck 用）；/static/ 另外判斷
 PUBLIC_ROUTES = ("/", "/index.html", "/api/version")
@@ -134,6 +139,21 @@ def error_body(message: str, *, code: str, hint: str = "",
                retryable: bool = False) -> dict[str, Any]:
     return {"ok": False, "error": {"code": code, "message": message,
                                    "retryable": retryable, "hint": hint}}
+
+
+def _parse_range(header: str, size: int) -> tuple[int, int] | None:
+    """`bytes=a-b`、`bytes=a-`、`bytes=-n`（單一範圍）→ (起, 迄)，含頭含尾；不合法回 None。"""
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", header.strip())
+    if not match or (not match[1] and not match[2]) or size == 0:
+        return None
+    if not match[1]:                      # 最後 n 個位元組
+        n = int(match[2])
+        return (max(0, size - n), size - 1) if n > 0 else None
+    start = int(match[1])
+    end = int(match[2]) if match[2] else size - 1
+    if start >= size or end < start:
+        return None
+    return start, min(end, size - 1)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -250,6 +270,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._jobs(query)
             elif route.startswith("/api/job/"):
                 self._job(route[len("/api/job/"):], query)
+            elif route == "/api/shorts":
+                self._json({"ok": True, "shorts": shorts_mod.list_shorts(config_mod.load())})
+            elif route.startswith("/api/short/"):
+                self._json({"ok": True, "short": shorts_mod.detail(
+                    config_mod.load(), urllib.parse.unquote(route[len("/api/short/"):]))})
+            elif route.startswith("/file/"):
+                self._file(route[len("/file/"):])
             elif route.startswith("/api/"):
                 self._error(f"沒有這個端點：{route}", status=404, code="not_found")
             else:
@@ -269,6 +296,12 @@ class Handler(BaseHTTPRequestHandler):
                 work_dir = config_mod.load().work_dir
                 self._json({"ok": True, "job": jobs_mod.request_cancel(work_dir, parts[2]),
                             "signalled": True})
+            elif self.command == "POST" and route == "/api/validate":
+                manifest, _ = shorts_mod.parse_document(self._manifest_doc())
+                self._json({"ok": True, **shorts_mod.describe(manifest)})
+            elif self.command == "POST" and len(parts) == 2 and parts[0] == "api" \
+                    and parts[1] in shorts_mod.OPS:
+                self._start(parts[1])
             elif route.startswith("/api/"):
                 self._error(f"沒有這個端點：{route}", status=404, code="not_found")
             else:
@@ -277,6 +310,86 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(exc)
 
     do_POST = do_PUT = do_DELETE = _write  # noqa: N815
+
+    def _body(self) -> dict[str, Any]:
+        """請求本體的 JSON 物件。太大、不是 JSON、不是物件都回 400。"""
+        cached = getattr(self, "_cached_body", None)
+        if cached is not None:
+            return cached
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise BadInput("Content-Length 不對") from None
+        if length > MAX_BODY:
+            raise BadInput(f"請求太大（上限 {MAX_BODY // 1024 // 1024} MB）")
+        raw = self.rfile.read(length) if length else b""
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, ValueError):
+            raise BadInput("請求本體要是 JSON") from None
+        if not isinstance(data, dict):
+            raise BadInput("請求本體要是 JSON 物件")
+        self._cached_body = data
+        return data
+
+    def _manifest_doc(self) -> Any:
+        body = self._body()
+        if "manifest" not in body:
+            raise BadInput("缺少 manifest", hint='本體格式：{"manifest": {…}}')
+        return body["manifest"]
+
+    def _start(self, op: str) -> None:
+        """POST /api/<op>：{"manifest": {...}}（cover 另有 at、text）→ 202 與 job id。"""
+        doc = self._manifest_doc()
+        body = self._body()
+        at = body.get("at")
+        text = body.get("text")
+        if at is not None and (isinstance(at, bool) or not isinstance(at, (int, float))):
+            raise BadInput("at 要是數字（秒）")
+        if text is not None and not isinstance(text, str):
+            raise BadInput("text 要是字串")
+        info = shorts_mod.launch(config_mod.load(), op, doc, at=at, text=text)
+        self._json({"ok": True, **info}, 202)
+
+    def _file(self, rest: str) -> None:
+        """GET /file/<id>/<out|work>/<檔名>：成品與中間檔，支援單一 Range（影片可以拖拉）。"""
+        parts = [urllib.parse.unquote(p) for p in rest.split("/")]
+        if len(parts) != 3:
+            self._error(f"沒有這個檔案：/file/{rest}", status=404, code="not_found")
+            return
+        path, ctype = shorts_mod.resolve_file(config_mod.load(), *parts)
+        size = path.stat().st_size
+        start, end, status = 0, size - 1, 200
+        header = self.headers.get("Range")
+        if header:
+            span = _parse_range(header, size)
+            if span is None:
+                self._error("Range 超出檔案範圍", status=416, code="bad_input",
+                            headers={"Content-Range": f"bytes */{size}"})
+                return
+            start, end = span
+            status = 206
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        try:
+            with path.open("rb") as f:
+                f.seek(start)
+                left = end - start + 1
+                while left > 0:
+                    chunk = f.read(min(FILE_CHUNK, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _doctor(self, query: str) -> None:
         from . import doctor
