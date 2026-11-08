@@ -10,6 +10,7 @@ CLI（`validate`、`make`）、HTTP API 與之後的 MCP 共用這一層，三�
 - `delete`：刪掉一支片的中間檔與成品（共用的旁白快取不動）。
 - `update_manifest`：網頁編輯後寫回 manifest；`revision` 防止蓋掉別人剛改的
   （別的視窗、agent、新的 plan）。
+- `search_assets`：換素材時向 vidgrab 搜尋，候選依授權、夠不夠長、直式優先排好。
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,8 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import assets, credits, jobs, planner, render, timeline
 from . import config as config_mod
-from . import credits, jobs, planner, render, timeline
 from . import manifest as manifest_mod
 from .config import Config
 from .errors import BadInput, NotFound, VidpipeError
@@ -361,6 +363,105 @@ def update_manifest(cfg: Config, short_id: str, doc: Any, revision: Any) -> dict
                        hint="作品 id 改不了")
     timeline.store_manifest(cfg, short_id, doc)
     return {"short_id": short_id, "manifest_revision": revision_of(doc)}
+
+
+SEARCH_LIMIT = 24
+SEARCH_MAX = 60
+SEARCH_TIMEOUT = 60.0        # 互動用的搜尋，不像 plan 可以等五分鐘
+SEARCH_KEYS = {"query", "target", "platform", "orientation", "allow_unknown_license", "limit"}
+
+
+def _search_keywords(value: Any) -> list[str]:
+    """`"a, b"` 或 `["a", "b"]` → 關鍵字清單；空的不行。"""
+    if isinstance(value, str):
+        value = [part for part in re.split(r"[,，、\n]", value)]
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        raise BadInput("query 要是字串（用逗號分開）或字串清單",
+                       hint='例："night market, street food"')
+    found = [x.strip() for x in value if x.strip()]
+    if not found:
+        raise BadInput("query 不能是空的", hint="給一到幾個搜尋關鍵字（英文效果最好）")
+    return found[:8]
+
+
+def search_assets(cfg: Config, short_id: str, body: Any, *, client: Any = None) -> dict[str, Any]:
+    """換素材：依關鍵字向 vidgrab 搜尋，回排好的候選（不改任何檔案）。
+
+    `body`：`{"query": "a, b", "target": "scene:<id>" | "music"}`，另可帶 `platform`、
+    `orientation`（預設 any：橫式也列出來，只是排在直式後面）、`allow_unknown_license`、`limit`。
+    排序跟 `plan` 同一套（授權 > 夠不夠長 > 直式優先），但已經用在別的場景的不會被擠掉，
+    只標 `used_in`；現在這個場景用的標 `current`。授權不明的預設不列，數量在 `skipped_license`。
+    """
+    check_short_id(short_id)
+    root = timeline.short_dir(cfg, short_id)
+    if not root.is_dir():
+        raise NotFound(f"沒有這支片：{short_id}", hint="`GET /api/shorts` 列出所有作品")
+    doc, source = _current_manifest(root)
+    if source not in ("manifest", "plan") or doc is None:
+        raise BadInput("這支片還沒有可以換素材的 manifest", hint="先挑素材（plan），或 make 一次")
+    if not isinstance(body, dict):
+        raise BadInput("本體要是 JSON 物件", hint='{"query": "night market", "target": "scene:s1"}')
+    extra = sorted(set(body) - SEARCH_KEYS)
+    if extra:
+        raise BadInput(f"不認得的欄位：{', '.join(extra)}",
+                       hint=f"可用：{', '.join(sorted(SEARCH_KEYS))}")
+    keywords = _search_keywords(body.get("query"))
+    manifest, _ = parse_document(doc, cfg)
+    described = describe(manifest)
+    target = body.get("target")
+    music = target == "music"
+    current = ""
+    used_in: dict[str, list[str]] = {}
+    if music:
+        need = described["estimated_seconds"]
+        current = str((doc.get("music") or {}).get("asset_id") or "")
+    elif isinstance(target, str) and target.startswith("scene:"):
+        scene_id = target[len("scene:"):]
+        ids = [scene.id for scene in manifest.scenes]
+        if scene_id not in ids:
+            raise BadInput(f"這支片沒有場景 {scene_id}", hint=f"場景：{', '.join(ids)}")
+        index = ids.index(scene_id)
+        need = described["scenes"][index]["estimated_seconds"]
+        current = str((manifest.scenes[index].clip or {}).get("asset_id") or "")
+        for scene in manifest.scenes:
+            other = str((scene.clip or {}).get("asset_id") or "")
+            if other and scene.id != scene_id:
+                used_in.setdefault(other, []).append(scene.id)
+    else:
+        raise BadInput("target 要是 scene:<場景 id> 或 music", hint='例："scene:s1"')
+
+    default = planner.Settings().music_platform if music else planner.Settings().platform
+    platform = body.get("platform", default)
+    allowed = planner.MUSIC_PLATFORMS if music else planner.PLATFORMS
+    if platform not in allowed:
+        raise BadInput(f"不認得的 platform：{platform!r}", hint=f"可用：{', '.join(allowed)}")
+    orientation = body.get("orientation", "any")
+    if orientation not in planner.ORIENTATIONS:
+        raise BadInput(f"不認得的 orientation：{orientation!r}",
+                       hint=f"可用：{', '.join(planner.ORIENTATIONS)}")
+    limit = body.get("limit", SEARCH_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= SEARCH_MAX:
+        raise BadInput(f"limit 要是 1–{SEARCH_MAX} 的整數")
+    allow_unknown = body.get("allow_unknown_license", False)
+    if not isinstance(allow_unknown, bool):
+        raise BadInput("allow_unknown_license 要是 true 或 false")
+
+    settings = planner.Settings(platform=platform, orientation=orientation,
+                                allow_unknown_license=allow_unknown, per_keyword=12,
+                                timeout=SEARCH_TIMEOUT)
+    client = client or assets.make_client(cfg)
+    found = client.search(keywords, platform=platform, orientation=orientation,
+                          per_keyword=settings.per_keyword, timeout=settings.timeout)
+    candidates = list(found["candidates"])
+    ranked, _ = planner.rank(candidates, need, settings, set(), music=music)
+    ranked.sort(key=lambda c: bool(used_in.get(c["id"])))        # 用在別處的排後面；其餘維持原排序
+    return {"short_id": short_id, "target": target, "query": keywords, "platform": platform,
+            "need": need, "total": len(candidates),
+            "skipped_license": planner.skipped_count(candidates, settings),
+            "candidates": [dict(planner._brief(c), why=planner._why(c, need, music=music),
+                                enough=planner.long_enough(c, need),
+                                used_in=used_in.get(c["id"], []), current=c["id"] == current)
+                           for c in ranked[:limit]]}
 
 
 def delete(cfg: Config, short_id: str) -> dict[str, Any]:

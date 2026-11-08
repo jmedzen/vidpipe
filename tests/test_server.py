@@ -95,7 +95,13 @@ def test_shell_and_static_files(start):
     srv = start()
     page = srv.get("/")
     assert page.status_code == 200 and "<title>vidpipe</title>" in page.text
-    assert "default-src 'none'" in page.headers["Content-Security-Policy"]
+    csp = dict(part.strip().split(" ", 1) for part in
+               page.headers["Content-Security-Policy"].split(";") if part.strip())
+    assert csp["default-src"] == "'none'" and csp["script-src"] == "'self'"
+    assert csp["connect-src"] == "'self'" and csp["frame-ancestors"] == "'none'"
+    # 換素材的縮圖來自素材站的 CDN：圖片可以是 https，其餘（腳本、連線、媒體）仍然只許同源
+    assert "https:" in csp["img-src"].split() and "http:" not in csp["img-src"].split()
+    assert "https:" not in " ".join(v for k, v in csp.items() if k != "img-src")
     assert page.headers["X-Frame-Options"] == "DENY"
     assert page.headers["X-Content-Type-Options"] == "nosniff"
     js = srv.get("/static/assets/app.js")

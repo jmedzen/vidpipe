@@ -490,23 +490,23 @@ function JobsPanel({ jobs }: { jobs: JobBrief[] }) {
 
 /* ---------------------------------------------------------- 分頁：挑素材（plan 的報告） */
 
-function Alternatives({ items }: { items: PlanCandidate[] }) {
+function Alternatives({ items, music }: { items: PlanCandidate[]; music?: boolean }) {
   if (items.length === 0) return null
   return (
     <details className="alts">
       <summary>備選 {items.length} 個</summary>
-      {items.map((c) => <CandidateLine key={c.asset_id} cand={c} />)}
+      {items.map((c) => <CandidateLine key={c.asset_id} cand={c} music={music} />)}
     </details>
   )
 }
 
-function PickBody({ pick, none }: { pick: PlanPick & { clip?: 'given' }; none: string }) {
+function PickBody({ pick, none, music }: { pick: PlanPick & { clip?: 'given' }; none: string; music?: boolean }) {
   return (
     <>
       {pick.clip === 'given' && <p className="muted small">這個場景原本就指定了素材，沒有動它。</p>}
-      {pick.chosen && <CandidateLine cand={pick.chosen} />}
+      {pick.chosen && <CandidateLine cand={pick.chosen} music={music} />}
       {!pick.chosen && pick.clip !== 'given' && <p className="plan-none">{none}</p>}
-      <Alternatives items={pick.alternatives ?? []} />
+      <Alternatives items={pick.alternatives ?? []} music={music} />
     </>
   )
 }
@@ -567,7 +567,7 @@ function PlanPanel({ plan, planning, retry }: { plan: PlanReport | null; plannin
             <strong>背景音樂</strong>
             {plan.music.query.map((q) => <Pill key={q}>{q}</Pill>)}
           </header>
-          <PickBody pick={plan.music} none="沒有可用的背景音樂，成片不會有音樂" />
+          <PickBody pick={plan.music} music none="沒有可用的背景音樂，成片不會有音樂" />
         </section>
       )}
     </>

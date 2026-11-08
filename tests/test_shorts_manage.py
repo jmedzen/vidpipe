@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from test_server import Running
+from vgfake import FakeVidgrab
 
 from vidpipe import config as config_mod
 from vidpipe import jobs, server, shorts, timeline
@@ -349,3 +350,157 @@ def test_the_manifest_put_goes_through_the_token_and_origin_guards(cfg, api):
                       ) == doc_of()
     ok = run.put("/api/short/t1/manifest", json=body, headers={"Authorization": "Bearer s3cret"})
     assert ok.status_code == 200
+
+
+# ------------------------------------------------------------------ 換素材：向 vidgrab 搜尋
+
+cand = FakeVidgrab.candidate
+
+
+@pytest.fixture
+def vg(tmp_path, fake_server, monkeypatch):
+    """假 vidgrab：搜尋回 `vg.found`，記下收到的請求。"""
+    fake = FakeVidgrab(fake_server, b"")
+    fake.found = []
+    fake.search_handler = lambda body: fake.found
+    monkeypatch.setenv("VIDPIPE_VIDGRAB_URL", fake_server.url)
+    monkeypatch.setenv("VIDPIPE_WORK_DIR", str(tmp_path / "work"))
+    monkeypatch.setenv("VIDPIPE_OUT_DIR", str(tmp_path / "out"))
+    return fake
+
+
+@pytest.fixture
+def scfg(vg):
+    """設定要在假 vidgrab 的網址設好之後才讀。"""
+    return config_mod.load()
+
+
+def swap_doc(short_id="t1"):
+    return {"schema": "vidpipe.manifest/1", "id": short_id,
+            "scenes": [{"id": "s1", "text": "夜市很熱鬧。" * 4, "clip": {"asset_id": "pixabay:a"}},
+                       {"id": "s2", "text": "湯麵冒著煙。" * 4, "clip": {"asset_id": "pixabay:b"}}],
+            "music": {"asset_id": "jamendo:cur"}}
+
+
+def seed_swap(scfg, short_id="t1") -> None:
+    put(work(scfg, short_id) / "manifest.json", swap_doc(short_id))
+
+
+MIXED = [
+    cand("pixabay:p1", duration=20, thumbnail="https://cdn.example/p1.jpg"),
+    cand("pixabay:p2", duration=20, width=1920, height=1080),
+    cand("pixabay:p3", duration=20, kind="free-attribution"),
+    cand("pixabay:p4", duration=1),
+    cand("pixabay:a", duration=20),
+    cand("pixabay:b", duration=20),
+    cand("pixabay:u", duration=20, kind="unknown"),
+]
+
+
+def test_search_ranks_like_plan_but_keeps_used_ones_last_and_marks_the_current(scfg, vg):
+    seed_swap(scfg)
+    vg.found = MIXED
+    found = shorts.search_assets(scfg, "t1", {"query": "night market, steam", "target": "scene:s2"})
+    ids = [c["asset_id"] for c in found["candidates"]]
+    # 授權 > 夠不夠長 > 直式：自由使用且夠長的直式（p1、b）→ 橫式 p2 → 太短的 p4 → 要標註的 p3；
+    # 已經用在別的場景的 a 排最後；授權不明的（u）沒列入
+    assert ids == ["pixabay:p1", "pixabay:b", "pixabay:p2", "pixabay:p4", "pixabay:p3",
+                   "pixabay:a"]
+    assert (found["total"], found["skipped_license"]) == (7, 1)
+    by_id = {c["asset_id"]: c for c in found["candidates"]}
+    assert by_id["pixabay:b"]["current"] is True and by_id["pixabay:p1"]["current"] is False
+    assert by_id["pixabay:a"]["used_in"] == ["s1"] and by_id["pixabay:p1"]["used_in"] == []
+    assert by_id["pixabay:p1"]["thumbnail"] == "https://cdn.example/p1.jpg"
+    # 「夠長」跟 plan 同一條規則（比需要的多 0.5 秒）；說明文字也照這個說
+    assert by_id["pixabay:p1"]["enough"] is True and by_id["pixabay:p4"]["enough"] is False
+    assert "不夠" in by_id["pixabay:p4"]["why"] and "≥" in by_id["pixabay:p1"]["why"]
+    assert by_id["pixabay:p2"]["orientation"] == "landscape" and by_id["pixabay:p1"]["why"]
+    assert found["query"] == ["night market", "steam"] and found["need"] > 0
+    sent = vg.searches[0]
+    assert (sent["keywords"], sent["platform"], sent["orientation"]) == (
+        ["night market", "steam"], "stock", "any")
+
+
+def test_search_can_list_unknown_licenses_and_limits_the_count(scfg, vg):
+    seed_swap(scfg)
+    vg.found = MIXED
+    body = {"query": "x", "target": "scene:s1", "allow_unknown_license": True, "limit": 3}
+    found = shorts.search_assets(scfg, "t1", body)
+    assert len(found["candidates"]) == 3 and found["skipped_license"] == 0
+    everything = shorts.search_assets(scfg, "t1", {**body, "limit": 60})
+    assert "pixabay:u" in [c["asset_id"] for c in everything["candidates"]]
+
+
+def test_search_for_the_music_uses_the_music_platform_and_the_whole_length(scfg, vg):
+    seed_swap(scfg)
+    vg.found = [cand("jamendo:cur", duration=60, kind="free-attribution"),
+                cand("jamendo:new", duration=10, kind="free-attribution")]
+    found = shorts.search_assets(scfg, "t1", {"query": ["calm piano"], "target": "music"})
+    assert vg.searches[0]["platform"] == "music"
+    assert [(c["asset_id"], c["current"]) for c in found["candidates"]] == [
+        ("jamendo:cur", True), ("jamendo:new", False)]        # 夠長的在前面
+    assert not any(w in c["why"] for c in found["candidates"] for w in ("直式", "橫式", "尺寸不明"))
+    both = shorts.describe(shorts.parse_document(swap_doc(), scfg)[0])["estimated_seconds"]
+    assert found["need"] == both
+
+
+def test_search_never_touches_the_manifest(scfg, vg):
+    seed_swap(scfg)
+    vg.found = MIXED
+    before = (work(scfg, "t1") / "manifest.json").read_text(encoding="utf-8")
+    shorts.search_assets(scfg, "t1", {"query": "x", "target": "scene:s1"})
+    assert (work(scfg, "t1") / "manifest.json").read_text(encoding="utf-8") == before
+    assert sorted(p.name for p in work(scfg, "t1").iterdir()) == ["manifest.json"]
+
+
+def test_search_refuses_bad_requests_before_calling_vidgrab(scfg, vg):
+    seed_swap(scfg)
+    ok = {"query": "x", "target": "scene:s1"}
+    bad = [{**ok, "query": ""}, {**ok, "query": " , "}, {**ok, "query": [3]}, {**ok, "query": None},
+           {**ok, "target": "scene:nope"}, {**ok, "target": "s1"}, {**ok, "target": None},
+           {**ok, "platform": "music"}, {**ok, "platform": "bilibili2"},
+           {**ok, "orientation": "tall"}, {**ok, "limit": 0}, {**ok, "limit": 61},
+           {**ok, "limit": True}, {**ok, "allow_unknown_license": "yes"}, {**ok, "extra": 1},
+           "not an object", None]
+    for body in bad:
+        with pytest.raises(BadInput):
+            shorts.search_assets(scfg, "t1", body)
+    with pytest.raises(BadInput):
+        shorts.search_assets(scfg, "t1", {"query": "x", "target": "music", "platform": "stock"})
+    assert vg.searches == []
+
+
+def test_search_needs_a_known_short_with_a_manifest(scfg, vg):
+    body = {"query": "x", "target": "scene:s1"}
+    with pytest.raises(NotFound):
+        shorts.search_assets(scfg, "nope", body)
+    with pytest.raises(BadInput):
+        shorts.search_assets(scfg, "../x", body)
+    put(work(scfg, "draft") / "plan-request.json",
+        {"id": "draft", "title": "草稿", "scenes": [{"text": "好", "query": ["a"]}]})
+    with pytest.raises(BadInput, match="manifest"):
+        shorts.search_assets(scfg, "draft", body)
+    assert vg.searches == []
+
+
+def test_search_over_http_with_guards_and_an_unreachable_vidgrab(scfg, vg, api, monkeypatch):
+    seed_swap(scfg)
+    vg.found = MIXED
+    body = {"query": "night market", "target": "scene:s2"}
+    run = api(token="s3cret")
+    assert run.post("/api/short/t1/search", json=body).status_code == 401
+    cross = run.post("/api/short/t1/search", json=body,
+                     headers={"Authorization": "Bearer s3cret", "Origin": "http://evil.example"})
+    assert cross.status_code == 403 and vg.searches == []
+    ok = run.post("/api/short/t1/search", json=body, headers={"Authorization": "Bearer s3cret"})
+    assert ok.status_code == 200 and ok.json()["ok"] is True
+    assert ok.json()["candidates"][0]["asset_id"] == "pixabay:p1"
+    nope = run.post("/api/short/t1/search", json={**body, "target": "x"},
+                    headers={"Authorization": "Bearer s3cret"})
+    assert nope.status_code == 400 and nope.json()["error"]["code"] == "bad_input"
+    missing = run.post("/api/short/zzz/search", json=body,
+                       headers={"Authorization": "Bearer s3cret"})
+    assert missing.status_code == 404
+    monkeypatch.setenv("VIDPIPE_VIDGRAB_URL", "http://127.0.0.1:9")       # 沒人聽的 port
+    down = run.post("/api/short/t1/search", json=body, headers={"Authorization": "Bearer s3cret"})
+    assert down.status_code == 502 and down.json()["error"]["code"] == "upstream_error"

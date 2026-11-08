@@ -25,6 +25,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests")]
@@ -68,6 +69,16 @@ def serve(port: int, root: Path) -> int:
     return 0
 
 
+def thumb(color: str, label: str, *, wide: bool = False) -> str:
+    """假縮圖：data: SVG（CSP 的 img-src 放行 data:，離線也看得到）。"""
+    w, h = (320, 180) if wide else (180, 320)
+    svg = (f"<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'>"
+           f"<rect width='100%' height='100%' fill='{color}'/>"
+           f"<text x='50%' y='50%' fill='white' font-size='28' text-anchor='middle'>{label}</text>"
+           "</svg>")
+    return "data:image/svg+xml;utf8," + quote(svg)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("dir", help="要造在哪（會先清掉裡面的 work 與 out）")
@@ -94,14 +105,19 @@ def main() -> int:
     def search(body: dict) -> list[dict]:
         cand = FakeVidgrab.candidate
         if body["platform"] == "music":
-            found = [cand("jamendo:1", duration=40, kind="free-attribution",
-                          title="Calm piano")]
+            found = [cand("jamendo:1", duration=40, kind="free-attribution", title="Calm piano",
+                          width=0, height=0, thumbnail=thumb("#6a4a7a", "♪", wide=True)),
+                     cand("jamendo:2", duration=90, kind="free", title="Soft rain",
+                          width=0, height=0, thumbnail=thumb("#3a5a7a", "♪", wide=True))]
         else:
             n = len(vg.searches)
             kind = "check" if "risky" in " ".join(body["keywords"]) else "free"
-            found = [cand(f"pixabay:{n}1", duration=10, kind=kind, title=f"夜市畫面 {n}"),
+            found = [cand(f"pixabay:{n}1", duration=10, kind=kind, title=f"夜市畫面 {n}",
+                          thumbnail=thumb("#2d6a6a", "9:16")),
                      cand(f"pixabay:{n}2", duration=10, width=1920, height=1080, kind=kind,
-                          title=f"街景（橫式）{n}")]
+                          title=f"街景（橫式）{n}", thumbnail=thumb("#8a5a2b", "16:9", wide=True)),
+                     cand(f"pixabay:{n}3", duration=3, kind=kind, title=f"短短的一段 {n}",
+                          thumbnail=thumb("#5b4b8a", "3s"))]
         for item in found:
             vg.items[item["id"]] = item
         return found

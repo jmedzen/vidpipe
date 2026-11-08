@@ -418,6 +418,12 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .form-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 .cand { padding: 6px 0; }
+.cand.has-thumb { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: start; }
+.cand-thumb {
+  width: 96px; height: 72px; object-fit: contain; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel2); display: block;
+}
+.cand-body { min-width: 0; }
 .cand + .cand { border-top: 1px solid var(--line); }
 .cand p { margin-top: 2px; }
 .alts { margin-top: 6px; }
@@ -448,6 +454,10 @@ button.add { justify-self: start; }
 .swap summary { cursor: pointer; color: var(--accent-text); font-size: 13px; }
 .swap[open] summary { margin-bottom: 6px; }
 .swap .cand-head, .cand-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.swap-search { display: grid; gap: 6px; margin-bottom: 8px; }
+.swap-results, .swap-plan { margin-top: 6px; }
+.swap-plan { padding-top: 8px; border-top: 1px dashed var(--line); }
+.swap-results .cand-head > a, .swap-plan .cand-head > a { min-width: 0; overflow-wrap: anywhere; }
 .swap-manual { margin-top: 10px; display: grid; gap: 4px; }
 .swap-row { display: flex; gap: 8px; }
 .swap-row input { flex: 1; min-width: 0; }
