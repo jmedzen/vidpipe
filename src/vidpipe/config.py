@@ -29,6 +29,7 @@ class Config:
     tts_base_url: str = "http://127.0.0.1:8301"
     tts_token: str = ""
     tts_model: str = ""          # 尚未決定；空字串代表「由伺服器預設」
+    tts_concurrency: int = 1     # 同時送幾句去合成；本機單一模型通常 1 最穩
     voice_ref: str = ""          # 參考音檔路徑（CosyVoice3 等需要）
     reference_text: str = ""     # 參考音檔的逐字稿
     # 輸出
@@ -65,6 +66,11 @@ def _coerce(name: str, value: Any, default: Any) -> Any:
         if text in ("0", "false", "no", "off", ""):
             return False
         raise ConfigError(f"{name} 要是 true/false（收到 {value!r}）")
+    if isinstance(default, int):
+        try:
+            return int(str(value).strip())
+        except ValueError:
+            raise ConfigError(f"{name} 要是整數（收到 {value!r}）") from None
     return str(value)
 
 
@@ -95,6 +101,8 @@ def load(path: Path | None = None) -> Config:
     if cfg.subtitle_langs not in _VALID_SUBTITLES:
         raise ConfigError(f"subtitle_langs 不認得：{cfg.subtitle_langs}",
                           hint="可用 zh-TW 或 zh-TW+en")
+    if not 1 <= cfg.tts_concurrency <= 16:
+        raise ConfigError(f"tts_concurrency 要在 1–16（收到 {cfg.tts_concurrency}）")
     cfg.vidgrab_url = cfg.vidgrab_url.rstrip("/")
     cfg.tts_base_url = cfg.tts_base_url.rstrip("/")
     return cfg

@@ -44,17 +44,76 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
-def _recorded(kind: str, params: dict[str, Any], run: Callable[[], dict[str, Any]]) -> int:
-    """跑一個長指令並留下工作紀錄（網頁看得到進度）；輸出多一個 `job`（沒記錄就是 null）。"""
+_RESULT_KEYS = ("path", "duration", "width", "height", "fps", "looped", "size_bytes")
+
+
+def _recorded(kind: str, params: dict[str, Any], run: Callable[[], dict[str, Any]],
+              summary: Callable[[dict[str, Any]], dict[str, Any]] | None = None) -> int:
+    """跑一個長指令並留下工作紀錄（網頁看得到進度）；輸出多一個 `job`（沒記錄就是 null）。
+
+    `summary` 把輸出縮成存進紀錄的「結果」；預設只留檔案資訊那幾個欄位。
+    """
     from . import jobs
 
     cfg = config_mod.load()
     with jobs.JobRecorder(cfg.work_dir, kind, args=params, enabled=cfg.record_jobs) as job:
         out = run()
-        keys = ("path", "duration", "width", "height", "fps", "looped", "size_bytes")
-        job.set_result({k: out[k] for k in keys if k in out})
+        job.set_result(summary(out) if summary else {k: out[k] for k in _RESULT_KEYS if k in out})
     emit({"ok": True, "job": job.id if job.enabled else None, "output": out})
     return 0
+
+
+def _read_script(args: argparse.Namespace) -> str:
+    if args.text is not None:
+        return str(args.text)
+    if not args.script:
+        raise BadInput("要給腳本檔或 --text",
+                       hint="例：vidpipe split script.txt，或 --text \"一句話。\"")
+    if args.script == "-":
+        return sys.stdin.read()
+    from pathlib import Path
+
+    path = Path(args.script)
+    if not path.is_file():
+        from .errors import NotFound
+
+        raise NotFound(f"找不到腳本檔：{path}")
+    return path.read_text(encoding="utf-8")
+
+
+def cmd_split(args: argparse.Namespace) -> int:
+    from . import text
+
+    sentences = text.split_sentences(_read_script(args), args.max_chars)
+    emit({"ok": True, "count": len(sentences),
+          "sentences": [{"index": i, "text": t, "chars": len(t)} for i, t in enumerate(sentences)]})
+    return 0
+
+
+def cmd_speak(args: argparse.Namespace) -> int:
+    from . import narration, text
+
+    sentences = text.split_sentences(_read_script(args), args.max_chars)
+    cfg = config_mod.load()
+
+    def run() -> dict[str, Any]:
+        clips = narration.synthesize(sentences, cfg)
+        if args.out_dir:
+            import shutil
+            from pathlib import Path
+
+            dest = Path(args.out_dir)
+            dest.mkdir(parents=True, exist_ok=True)
+            width = max(3, len(str(len(clips))))
+            for clip in clips:
+                shutil.copyfile(clip.path, dest / f"{clip.index + 1:0{width}d}.wav")
+        return {"count": len(clips), "cached": sum(c.cached for c in clips),
+                "total_duration": round(sum(c.duration for c in clips), 3),
+                "clips": [c.to_dict() for c in clips]}
+
+    return _recorded("narrate", {"sentences": len(sentences), "max_chars": args.max_chars,
+                                 "model": cfg.tts_model or None}, run,
+                     summary=lambda o: {k: o[k] for k in ("count", "cached", "total_duration")})
 
 
 def cmd_normalize(args: argparse.Namespace) -> int:
@@ -176,6 +235,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--copy", action="store_true",
                    help="不重編碼（快、零損失；AAC 接縫可能有幾十毫秒誤差）")
     p.set_defaults(func=cmd_concat)
+
+    p = sub.add_parser("split", help="旁白文字分句（每句各自合成，也就是字幕的節奏）")
+    p.add_argument("script", nargs="?", help="腳本檔；- 讀 stdin")
+    p.add_argument("--text", help="直接給文字")
+    p.add_argument("--max-chars", type=int, default=40,
+                   help="一句最多幾字，超過在逗號處切（預設 40）")
+    p.set_defaults(func=cmd_split)
+
+    p = sub.add_parser("speak", help="分句後逐句合成旁白（有快取），輸出每句的檔案與秒數")
+    p.add_argument("script", nargs="?", help="腳本檔；- 讀 stdin")
+    p.add_argument("--text", help="直接給文字")
+    p.add_argument("--max-chars", type=int, default=40)
+    p.add_argument("--out-dir", help="另外把每句複製成 001.wav、002.wav… 到這個資料夾")
+    p.set_defaults(func=cmd_speak)
 
     p = sub.add_parser("jobs", help="工作紀錄清單（新的在前）")
     p.add_argument("--status", help="running／succeeded／failed／cancelled／interrupted")

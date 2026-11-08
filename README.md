@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`；旁白、字幕依序在後續 PR。
+> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`；旁白時間軸、字幕依序在後續 PR。
 
 ## 快速開始
 
@@ -39,15 +39,43 @@ vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_
 | `vidgrab_url` / `vidgrab_token` | `http://127.0.0.1:8310` / 空 | 素材來源 |
 | `tts_base_url` / `tts_token` | `http://127.0.0.1:8301` / 空 | 旁白（audio.cpp） |
 | `tts_model` | 空 | TTS 模型 id；尚未決定，空 = 伺服器預設 |
+| `tts_concurrency` | `1` | 同時送幾句去合成（1–16）；本機單一模型通常 1 最穩 |
 | `voice_ref` / `reference_text` | 空 | 音色參考音檔與逐字稿（CosyVoice3 等需要） |
 | `subtitle_langs` | `zh-TW` | `zh-TW` 或 `zh-TW+en`（雙語） |
 | `burn_subtitles` | `true` | 字幕是否燒進影片；關掉只輸出字幕檔 |
 | `work_dir` / `out_dir` | `work` / `out` | 中間產物與成品 |
 | `record_jobs` | `true` | 長指令是否在 `work_dir/_jobs` 留下紀錄（網頁看得到）；關掉就不寫 |
 
+## split／speak：分句與逐句旁白
+
+字幕的時間軸來自「逐句合成、量每句 WAV 的長度」，不靠 ASR——精準而且確定。所以分句的方式直接決定字幕的節奏。
+
+```bash
+vidpipe split script.txt                  # 只看怎麼分句：[{index, text, chars}]
+vidpipe split --text "台北的夜晚，從一碗熱湯開始。雨剛停！"
+vidpipe speak script.txt                  # 分句 → 逐句 TTS → 修頭尾靜音 → 每句的 wav 路徑與秒數
+vidpipe speak script.txt --out-dir wavs   # 另外複製成 001.wav、002.wav…
+```
+
+**分句規則**
+- 句末標點（`。！？；!?;…`）與換行一定切；標點後面的收尾引號、括號留在同一句（`他說：「走吧。」`）。
+- 英文句點只在真的句末才切：`3.5`、`v1.2`、`example.com`、`Mr. Lin` 不會被切開。
+- 句子超過 `--max-chars`（預設 40 字）就在逗號、頓號處切成幾段，每段盡量填滿但不超過上限；
+  沒有逗號可切的長句維持原樣，不硬砍字。
+- 只剩標點的碎片併回前一句。短句（例如「夠了。」）不會被合併。
+
+**合成**
+- **快取**：同樣的（文字、模型、音色參考、逐字稿）不重複合成，存在 `work_dir/cache/tts/<雜湊>.wav`。
+  改一個字只重做那一句；換模型或音色整批重做；換服務位址不影響。
+- **修靜音**：TTS 的頭尾常有空白，修掉頭尾（各留 50 毫秒），句與句之間才不會有莫名的停頓。
+- **並行度**用 `tts_concurrency` 設；結果順序永遠跟輸入一致，相同的句子只合成一次。
+- 任何一句失敗或被取消，還沒開始的句子不再送出；已完成的留在快取，修好重跑只補缺的。
+- 是長指令，會留下工作紀錄（`narrate`），網頁看得到逐句進度。
+- 真實的 audio.cpp 要先載入模型；CosyVoice3 還要 `voice_ref` 與 `reference_text`（`vidpipe doctor` 會檢查）。
+
 ## 工作紀錄：jobs／job／cancel
 
-`normalize`、`trim`、`fill`、`concat`（之後的旁白、渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
+`normalize`、`trim`、`fill`、`concat`、`speak`（之後的渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
 **不管是從終端機、API 還是 MCP 發起的**，網頁的「工作」頁都看得到。輸出的 JSON 多一個 `job`（記錄關掉時是 `null`）。
 
 ```bash
