@@ -18,6 +18,31 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
   return requestJson<T>(path, { method: 'GET' }, signal)
 }
 
+/** 取純文字檔（credits.md 之類）。失敗時跟 JSON 一樣丟 ApiFailure。 */
+export async function getText(path: string, signal?: AbortSignal): Promise<string> {
+  let resp: Response
+  try {
+    resp = await fetch(path, { credentials: 'same-origin', signal })
+  } catch (err) {
+    if (signal?.aborted) throw err
+    throw new ApiFailure(0, {
+      code: 'network',
+      message: '連不到 vidpipe 伺服器',
+      retryable: true,
+      hint: '確認 `vidpipe serve` 還在跑，網址與 port 沒變',
+    })
+  }
+  if (!resp.ok) {
+    throw new ApiFailure(resp.status, {
+      code: `http_${resp.status}`,
+      message: `伺服器回了 HTTP ${resp.status}`,
+      retryable: resp.status >= 500,
+      hint: '',
+    })
+  }
+  return resp.text()
+}
+
 /** 寫入類請求。瀏覽器會自動帶 Origin，伺服器據此擋跨站請求。 */
 export async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return requestJson<T>(path, { method: 'POST' }, signal)

@@ -19,7 +19,7 @@ function jobElapsed(job: Job): string {
 }
 
 /** 每秒重畫一次，進行中工作的「已跑多久」才會動。 */
-function useTick(active: boolean): void {
+export function useTick(active: boolean): void {
   const [, setN] = useState(0)
   useEffect(() => {
     if (!active) return

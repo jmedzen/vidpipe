@@ -1,4 +1,4 @@
-import type { Check, JobStatus, Level } from '../types'
+import type { Check, JobStatus, Level, ShortStage } from '../types'
 
 export function levelOf(check: Check): Level {
   if (check.ok) return 'ok'
@@ -39,6 +39,12 @@ export const KIND_TEXT: Record<string, string> = {
   trim: '裁切',
   fill: '湊成指定長度',
   concat: '串接',
+  make: '一次做完',
+  narrate: '旁白與時間軸',
+  render: '渲染',
+  cover: '封面',
+  credits: '素材清單',
+  plan: '挑素材',
 }
 
 const STAGE_TEXT: Record<string, string> = {
@@ -46,6 +52,14 @@ const STAGE_TEXT: Record<string, string> = {
   trim: '裁切',
   loop: '循環補長',
   concat: '串接',
+  narrate: '合成旁白',
+  timeline: '排時間軸',
+  assets: '準備素材',
+  segments: '處理場景',
+  audio: '混音與響度',
+  mux: '合成影片',
+  search: '搜尋素材',
+  music: '挑音樂',
 }
 
 export function stageText(name: string): string {
@@ -84,4 +98,47 @@ export function summarize(args: Record<string, unknown>): string {
 export function clock(ms: number | null): string {
   if (ms === null) return '—'
   return new Date(ms).toLocaleTimeString('zh-TW', { hour12: false })
+}
+
+/* ---------------------------------------------------------- 作品 */
+
+export const SHORT_STAGE_TEXT: Record<ShortStage, string> = {
+  new: '只有草稿',
+  narrated: '已有旁白',
+  rendered: '已完成',
+}
+
+export const SHORT_STAGE_LEVEL: Record<ShortStage, 'ok' | 'note' | 'plain'> = {
+  new: 'plain',
+  narrated: 'note',
+  rendered: 'ok',
+}
+
+/** 影片秒數：`19.2 秒`；超過一分鐘用 `1:05`。 */
+export function durationText(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined) return '—'
+  if (sec < 60) return `${sec.toFixed(1)} 秒`
+  return `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`
+}
+
+/** 時間軸上的時間點：`m:ss.s`。 */
+export function stamp(sec: number): string {
+  const whole = Math.floor(sec)
+  const tenth = Math.floor((sec - whole) * 10)
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}.${tenth}`
+}
+
+export function bytesText(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+export type LicenseTone = 'ok' | 'note' | 'warn'
+
+/** 授權的提醒程度：可自由使用／要標註／要自己確認（check、unknown、本機檔案）。 */
+export function licenseTone(kind: string | undefined): LicenseTone {
+  if (kind === 'free') return 'ok'
+  if (kind === 'free-attribution') return 'note'
+  return 'warn'
 }

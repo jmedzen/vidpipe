@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config as config_mod
-from . import jobs, planner, render, timeline
+from . import credits, jobs, planner, render, timeline
 from . import manifest as manifest_mod
 from .config import Config
 from .errors import BadInput, NotFound, VidpipeError
@@ -154,6 +154,16 @@ def _job_brief(job: dict[str, Any]) -> dict[str, Any]:
                                     "finished_at")}
 
 
+def _credits_brief(short_id: str, title: str, sources: Any) -> dict[str, Any] | None:
+    """素材與授權的數量（列表上的「有 N 個授權要確認」用）；還沒渲染過就是 None。"""
+    if not isinstance(sources, dict):
+        return None
+    summary = credits.build(short_id, title, sources)[1]
+    return {"assets": summary["assets"],
+            "attribution_required": len(summary["attribution_required"]),
+            "unclear": len(summary["unclear"])}
+
+
 def summarize(cfg: Config, short_id: str, latest: dict[str, dict[str, Any]] | None = None
               ) -> dict[str, Any]:
     root = timeline.short_dir(cfg, short_id)
@@ -165,6 +175,8 @@ def summarize(cfg: Config, short_id: str, latest: dict[str, dict[str, Any]] | No
     return {"id": short_id, "title": doc.get("title") or "", "stage": _stage(files),
             "scenes": len(doc.get("scenes") or []), "total": tl.get("total"),
             "files": files, "updated_at": _iso(max(mtimes)) if mtimes else None,
+            "credits": _credits_brief(short_id, doc.get("title") or "",
+                                      _read_json(root / "sources.json")),
             "last_job": _job_brief(job) if job else None}
 
 
