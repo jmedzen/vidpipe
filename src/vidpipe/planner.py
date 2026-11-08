@@ -393,6 +393,22 @@ def summarize(result: dict[str, Any]) -> dict[str, Any]:
             "report": result["report"]}
 
 
+def apply_options(doc: Any, *, music: str | None = None, allow_unknown_license: bool = False,
+                  platform: str | None = None, orientation: str | None = None) -> Any:
+    """CLI 旗標與網頁表單共用：把搜尋設定與音樂關鍵字疊到草稿上（不是 dict 就原樣回，
+    讓 `parse_request` 去報錯）。"""
+    if not isinstance(doc, dict):
+        return doc
+    search = {k: v for k, v in (("platform", platform), ("orientation", orientation),
+                                ("allow_unknown_license", allow_unknown_license or None))
+              if v is not None}
+    if search:
+        doc = {**doc, "search": {**(doc.get("search") or {}), **search}}
+    if music:
+        doc = {**doc, "music": {**(doc.get("music") or {}), "query": music}}
+    return doc
+
+
 # ------------------------------------------------------------------ 檔案
 
 def store_request(cfg: Config, short_id: str, doc: Any) -> Path:

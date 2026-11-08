@@ -198,14 +198,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     from . import planner
 
     cfg = config_mod.load()
-    doc = _plan_input(args)
-    overrides = {k: v for k, v in (("platform", args.platform), ("orientation", args.orientation),
-                                   ("allow_unknown_license", args.allow_unknown_license or None))
-                 if v is not None}
-    if overrides and isinstance(doc, dict):
-        doc = {**doc, "search": {**(doc.get("search") or {}), **overrides}}
-    if args.music and isinstance(doc, dict):
-        doc = {**doc, "music": {**(doc.get("music") or {}), "query": args.music}}
+    doc = planner.apply_options(_plan_input(args), music=args.music,
+                                allow_unknown_license=args.allow_unknown_license,
+                                platform=args.platform, orientation=args.orientation)
     req = planner.parse_request(doc, cfg)          # 先驗證：寫錯就不開工作
 
     def run() -> dict[str, Any]:

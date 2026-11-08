@@ -7,12 +7,14 @@ CLI（`validate`、`make`）、HTTP API 與之後的 MCP 共用這一層，三�
   開一個 `python -m vidpipe <指令>` 子行程去跑——工作紀錄、進度、取消（SIGTERM）都是 W2
   做好的那一套，所以不需要另一個工作佇列；伺服器重開也不會弄丟正在跑的工作。
 - `summarize`／`detail`／`resolve_file`：看狀態與取檔。只認白名單裡的檔名，路徑跳脫不可能。
+- `delete`：刪掉一支片的中間檔與成品（共用的旁白快取不動）。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -146,7 +148,31 @@ def _stage(files: list[dict[str, Any]]) -> str:
         return "rendered"
     if "timeline.json" in names:
         return "narrated"
+    if planner.PLAN_FILE in names:
+        return "planned"
     return "new"
+
+
+def _current_manifest(root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """這支片現在「算數」的 manifest，與它的來源（`manifest`／`plan`／`draft`）。
+
+    `manifest.json` 是最後一次送去做（narrate、render、make）的版本；`plan` 不碰它，只留
+    `plan.json`。所以 plan 比 manifest.json 新（或還沒有 manifest.json）就用 plan 挑好的那份；
+    連 plan 都還沒跑完（或失敗了）就退回送進去的草稿，讓列表上至少看得到標題與場景數。
+    """
+    made = root / "manifest.json"
+    planned = root / planner.PLAN_FILE
+    doc = _read_json(made)
+    if isinstance(doc, dict) and not (
+            planned.is_file() and planned.stat().st_mtime > made.stat().st_mtime):
+        return doc, "manifest"
+    plan = _read_json(planned)
+    if isinstance(plan, dict) and isinstance(plan.get("manifest"), dict):
+        return plan["manifest"], "plan"
+    draft = _read_json(root / planner.REQUEST_FILE)
+    if isinstance(draft, dict):
+        return draft, "draft"
+    return (doc, "manifest") if isinstance(doc, dict) else (None, None)
 
 
 def _job_brief(job: dict[str, Any]) -> dict[str, Any]:
@@ -167,7 +193,7 @@ def _credits_brief(short_id: str, title: str, sources: Any) -> dict[str, Any] | 
 def summarize(cfg: Config, short_id: str, latest: dict[str, dict[str, Any]] | None = None
               ) -> dict[str, Any]:
     root = timeline.short_dir(cfg, short_id)
-    doc = _read_json(root / "manifest.json") or {}
+    doc = _current_manifest(root)[0] or {}
     tl = _read_json(root / "timeline.json") or {}
     files = files_of(cfg, short_id)
     mtimes = [(root / f["name"]).stat().st_mtime for f in files if f["area"] == "work"]
@@ -210,7 +236,10 @@ def detail(cfg: Config, short_id: str) -> dict[str, Any]:
     summary = summarize(cfg, short_id, _latest_jobs(cfg))
     recent = [_job_brief(j) for j in jobs.list_jobs(cfg.work_dir, limit=200)
               if j.get("short_id") == short_id][:10]
-    return {**summary, "manifest": _read_json(root / "manifest.json"),
+    manifest, source = _current_manifest(root)
+    plan = _read_json(root / planner.PLAN_FILE)
+    return {**summary, "manifest": manifest, "manifest_source": source,
+            "plan": plan.get("report") if isinstance(plan, dict) else None,
             "timeline": None if tl is None else {
                 "total": tl.get("total"), "total_frames": tl.get("total_frames"),
                 "fps": tl.get("fps"), "scenes": tl.get("scenes"), "warnings": tl.get("warnings"),
@@ -237,6 +266,59 @@ def _wait_for_job(cfg: Config, proc: subprocess.Popen[bytes], errfile: Any) -> s
                        hint="伺服器可能太忙；稍後看 `GET /api/jobs`，工作也許已經開始")
 
 
+def _assert_idle(cfg: Config, short_id: str) -> None:
+    """同一支片同時只能有一個工作；有的話回 409。"""
+    for job in jobs.list_jobs(cfg.work_dir, limit=200, status="running"):
+        if job.get("short_id") == short_id:
+            raise jobs.Conflict(f"{short_id} 已經有工作在跑（{job['kind']}：{job['id']}）",
+                                hint="等它做完，或 `POST /api/job/<id>/cancel` 取消")
+
+
+def draft_from_body(body: dict[str, Any]) -> dict[str, Any]:
+    """`POST /api/plan` 的另一種本體：純文字腳本（網頁貼上去的那種）加幾個選項。
+
+    `{"script": "…", "id": "taipei-night-01", "title": "…", "music": "calm piano",
+    "allow_unknown_license": false}`；腳本格式與 `vidpipe plan script.txt` 一樣。
+    """
+    def text(key: str, *, required: bool = False) -> str | None:
+        value = body.get(key)
+        if value is None or value == "":
+            if required:
+                raise BadInput(f"缺少 {key}", hint="本體格式：{\"script\": \"…\", \"id\": \"…\"}")
+            return None
+        if not isinstance(value, str):
+            raise BadInput(f"{key} 要是字串")
+        return value
+
+    allow = body.get("allow_unknown_license", False)
+    if not isinstance(allow, bool):
+        raise BadInput("allow_unknown_license 要是 true 或 false")
+    short_id = check_short_id(text("id", required=True) or "")
+    doc = planner.parse_script(text("script", required=True) or "", short_id=short_id,
+                               title=text("title") or "")
+    return planner.apply_options(doc, music=text("music"), allow_unknown_license=allow,
+                                 platform=text("platform"), orientation=text("orientation"))
+
+
+def delete(cfg: Config, short_id: str) -> dict[str, Any]:
+    """刪掉這支片的中間檔（`work/shorts/<id>`）與成品（out 裡的 mp4、封面、credits、srt）。
+
+    旁白快取是各片共用的，不動；工作紀錄也留著。有工作在跑時不給刪（409）。
+    """
+    check_short_id(short_id)
+    root = timeline.short_dir(cfg, short_id)
+    out = Path(cfg.out_dir)
+    outputs = [out / f"{short_id}{suffix}" for suffix in OUT_SUFFIXES]
+    if not root.is_dir() and not any(p.is_file() for p in outputs):
+        raise NotFound(f"沒有這支片：{short_id}", hint="`GET /api/shorts` 列出所有作品")
+    _assert_idle(cfg, short_id)
+    removed = [f"{f['area']}/{f['name']}" for f in files_of(cfg, short_id)]
+    shutil.rmtree(root, ignore_errors=True)
+    for path in outputs:
+        path.unlink(missing_ok=True)
+    return {"short_id": short_id, "deleted": True, "removed": removed}
+
+
 def launch(cfg: Config, op: str, doc: Any, *, at: float | None = None,
            text: str | None = None) -> dict[str, Any]:
     """驗證 manifest、存進作品資料夾、開子行程跑 `vidpipe <op>`，回 job id（工作在背景跑）。
@@ -249,10 +331,7 @@ def launch(cfg: Config, op: str, doc: Any, *, at: float | None = None,
         short_id = planner.parse_request(doc, cfg).manifest.id
     else:
         short_id = parse_document(doc, cfg)[0].id
-    for job in jobs.list_jobs(cfg.work_dir, limit=200, status="running"):
-        if job.get("short_id") == short_id:
-            raise jobs.Conflict(f"{short_id} 已經有工作在跑（{job['kind']}：{job['id']}）",
-                                hint="等它做完，或 `POST /api/job/<id>/cancel` 取消")
+    _assert_idle(cfg, short_id)
     path = (planner.store_request(cfg, short_id, doc) if op == "plan"
             else timeline.store_manifest(cfg, short_id, doc))
     cmd = [sys.executable, "-m", "vidpipe", op, str(path)]

@@ -299,6 +299,9 @@ class Handler(BaseHTTPRequestHandler):
                 work_dir = config_mod.load().work_dir
                 self._json({"ok": True, "job": jobs_mod.request_cancel(work_dir, parts[2]),
                             "signalled": True})
+            elif self.command == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "short"]:
+                self._json({"ok": True, **shorts_mod.delete(
+                    config_mod.load(), urllib.parse.unquote(parts[2]))})
             elif self.command == "POST" and route == "/api/validate":
                 manifest, _ = shorts_mod.parse_document(self._manifest_doc())
                 self._json({"ok": True, **shorts_mod.describe(manifest)})
@@ -368,9 +371,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(reply)
 
     def _start(self, op: str) -> None:
-        """POST /api/<op>：{"manifest": {...}}（cover 另有 at、text）→ 202 與 job id。"""
-        doc = self._manifest_doc()
+        """POST /api/<op>：{"manifest": {...}}（cover 另有 at、text；plan 也收純文字腳本）→ 202。"""
         body = self._body()
+        doc = (shorts_mod.draft_from_body(body) if op == "plan" and "script" in body
+               else self._manifest_doc())
         at = body.get("at")
         text = body.get("text")
         if at is not None and (isinstance(at, bool) or not isinstance(at, (int, float))):

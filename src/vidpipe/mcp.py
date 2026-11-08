@@ -113,7 +113,7 @@ TOOLS: list[dict[str, Any]] = [
      "description": "取消還在跑的工作（已完成的素材與旁白快取會保留）。",
      "inputSchema": _obj({"id": {"type": "string"}}, ["id"])},
     {"name": "list_shorts",
-     "description": "所有作品：階段（new／narrated／rendered）、長度、檔案、最近一個工作。",
+     "description": "所有作品：階段（new／planned／narrated／rendered）、長度、檔案、最近的工作。",
      "inputSchema": _obj({})},
     {"name": "get_short",
      "description": "單一作品的完整狀態：manifest、時間軸摘要、素材出處、"

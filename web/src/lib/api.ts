@@ -44,16 +44,28 @@ export async function getText(path: string, signal?: AbortSignal): Promise<strin
 }
 
 /** 寫入類請求。瀏覽器會自動帶 Origin，伺服器據此擋跨站請求。 */
-export async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  return requestJson<T>(path, { method: 'POST' }, signal)
+export async function postJson<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: 'POST', body }, signal)
 }
 
-async function requestJson<T>(path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
+export async function deleteJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: 'DELETE' }, signal)
+}
+
+interface Request {
+  method: string
+  body?: unknown
+}
+
+async function requestJson<T>(path: string, req: Request, signal?: AbortSignal): Promise<T> {
   let resp: Response
   try {
     resp = await fetch(path, {
-      ...init,
-      headers: { Accept: 'application/json' },
+      method: req.method,
+      headers: req.body === undefined
+        ? { Accept: 'application/json' }
+        : { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: req.body === undefined ? undefined : JSON.stringify(req.body),
       credentials: 'same-origin',
       signal,
     })

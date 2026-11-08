@@ -4,6 +4,7 @@ import type { NavItem } from './components/Sidebar'
 import { useApi } from './lib/api'
 import { applyTheme, initialTheme } from './lib/theme'
 import { JobDetailPage, JobsPage } from './pages/Jobs'
+import { NewShortPage } from './pages/NewShort'
 import { Overview } from './pages/Overview'
 import { Settings } from './pages/Settings'
 import { ShortDetailPage, ShortsPage } from './pages/Shorts'
@@ -15,6 +16,9 @@ const NAV: NavItem[] = [
   { id: 'jobs', label: '工作', icon: '▤' },
   { id: 'settings', label: '設定', icon: '⚙' },
 ]
+
+/** 不在側欄上、但有自己網址的頁（`#/new`）。 */
+const HIDDEN_PAGES = ['new']
 
 interface Route {
   page: string
@@ -36,7 +40,7 @@ function safeDecode(text: string): string {
  */
 function routeFromHash(): Route {
   const [id = '', param = '', sub = ''] = window.location.hash.replace(/^#\/?/, '').split('/')
-  return NAV.some((n) => n.id === id)
+  return NAV.some((n) => n.id === id) || HIDDEN_PAGES.includes(id)
     ? { page: id, param: safeDecode(param), sub }
     : { page: 'overview', param: '', sub: '' }
 }
@@ -58,14 +62,15 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    document.title = `${NAV.find((n) => n.id === route.page)?.label ?? ''} · vidpipe`
+    document.title = `${route.page === 'new' ? '新增作品' : NAV.find((n) => n.id === route.page)?.label ?? ''} · vidpipe`
   }, [route.page])
 
   return (
     <div className="app">
-      <Sidebar items={NAV} route={route.page} version={version.data} theme={theme} onTheme={changeTheme} />
+      <Sidebar items={NAV} route={route.page === 'new' ? 'shorts' : route.page} version={version.data} theme={theme} onTheme={changeTheme} />
       <main>
         {route.page === 'settings' && <Settings />}
+        {route.page === 'new' && <NewShortPage />}
         {route.page === 'shorts' && (route.param
           ? <ShortDetailPage key={route.param} id={route.param} tab={route.sub} />
           : <ShortsPage />)}

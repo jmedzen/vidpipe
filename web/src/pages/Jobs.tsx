@@ -110,7 +110,7 @@ function KeyValues({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-function CancelButton({ id, onDone }: { id: string; onDone: () => void }) {
+export function CancelButton({ id, onDone }: { id: string; onDone: () => void }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiFailure | null>(null)

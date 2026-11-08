@@ -313,15 +313,22 @@ vidpipe serve                      # http://127.0.0.1:8320，會開預設瀏覽�
 vidpipe serve --port 8080
 ```
 
-目前有四頁：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查，失敗時顯示原因與 hint；
+目前有四頁（另有「新增作品」）：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查，失敗時顯示原因與 hint；
 下方是最近的工作）、**作品**（每支片做到哪、長度、有幾個素材的授權要確認；點進去有成品播放器、
 每個場景與每句旁白的時間——點句子就跳到那一秒、素材與授權（含可以直接複製的說明欄範本）、檔案、manifest、
 這支片的工作；最近一次失敗會直接講原因）、**工作**（每個長指令的狀態、進度條、階段、參數、結果、
 事件記錄、失敗原因，進行中的可以取消）、**設定**（目前生效的設定，token 遮蔽）。
-貼腳本、重做與換素材隨後續 PR 加入，規劃見 `vidpipe-web-ui-plan.md`。
+**不用開終端機也能做一支片**：「作品」頁右上角「＋ 新增作品」→ 貼腳本（空白行隔開場景，`關鍵字：a, b`
+那行是搜素材用的）、取個 id、選填標題與音樂關鍵字 → 按「挑素材」，vidpipe 去 vidgrab 替每個場景挑素材
+（`POST /api/plan`）。「挑素材」分頁列出每個場景選了什麼、為什麼、有哪些備選與提醒；沒問題就按「做成片」
+（`POST /api/make`，旁白、素材、已渲染的場景都走快取，所以失敗後按「重跑」只會補做缺的）。
+「刪除」會清掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑時不能刪。
+換單一場景的素材、改旁白文字隨後續 PR 加入，規劃見 `vidpipe-web-ui-plan.md`。
 
 想先看看畫面又不想動真資料：`python tools/make_fixture.py /tmp/vp-fixture` 會用假 TTS 與合成素材做出四支片
 （做完的、有一個授權要確認的、只有旁白的、渲染失敗的），照它印出的指令 `vidpipe serve` 就能看。
+加 `--serve` 會讓假服務繼續開著並直接開網頁（預設 http://127.0.0.1:8320），「新增作品 → 挑素材 → 做成片
+→ 刪除」整條路都能點；`--tts-delay 2` 讓每句旁白多等 2 秒，才看得到進行中的進度條與取消。
 
 API（皆為 JSON，錯誤格式同 CLI）：
 
@@ -334,9 +341,10 @@ API（皆為 JSON，錯誤格式同 CLI）：
 | GET | `/api/job/{id}[/events]?after=N` | 單一工作與事件（`after` 之後的） |
 | POST | `/api/job/{id}/cancel` | 取消還在跑的工作 |
 | POST | `/api/validate` | 檢查 manifest（本體 `{"manifest": {…}}`）；等同 `vidpipe validate` |
-| POST | `/api/make`／`narrate`／`render`／`cover`／`credits`／`plan` | 送出工作（本體 `{"manifest": {…}}`，`cover` 另可帶 `at`、`text`，`plan` 的 `manifest` 是[草稿](#plan交給-vidpipe-挑素材)）；回 **202** 與 `job` |
-| GET | `/api/shorts` | 所有作品：階段（`new`／`narrated`／`rendered`）、長度、檔案、最近一個工作 |
-| GET | `/api/short/{id}` | 單一作品：manifest、時間軸摘要、素材出處、檔案、最近的工作 |
+| POST | `/api/make`／`narrate`／`render`／`cover`／`credits`／`plan` | 送出工作（本體 `{"manifest": {…}}`，`cover` 另可帶 `at`、`text`，`plan` 的 `manifest` 是[草稿](#plan交給-vidpipe-挑素材)，也可以改給純文字腳本 `{"script": "…", "id": "…", "title"?, "music"?, "allow_unknown_license"?}`）；回 **202** 與 `job` |
+| GET | `/api/shorts` | 所有作品：階段（`new`／`planned`／`narrated`／`rendered`）、長度、素材與授權的數量（`credits`）、檔案、最近一個工作 |
+| GET | `/api/short/{id}` | 單一作品：manifest（與它的來源 `manifest_source`：`manifest`／`plan`／`draft`）、plan 的挑選報告（`plan`）、時間軸摘要、素材出處、檔案、最近的工作 |
+| DELETE | `/api/short/{id}` | 刪掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑回 409 |
 | GET | `/file/{id}/{out\|work}/{檔名}` | 成品（`out`：mp4、封面、credits、srt）與中間檔（`work`）；支援 `Range` |
 
 ### 用 HTTP 讓 agent 做一支片（agent 與 vidpipe 不在同一台機器時）
