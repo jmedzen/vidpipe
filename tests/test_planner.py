@@ -449,6 +449,47 @@ def test_apply_options_layers_flags_on_a_draft_and_leaves_a_non_object_for_the_v
     assert planner.apply_options([1], music="x") == [1]
 
 
+def mcp_call(name, arguments, ident=1):
+    return mcp.handle_message({"jsonrpc": "2.0", "id": ident, "method": "tools/call",
+                               "params": {"name": name, "arguments": arguments}})["result"]
+
+
+def test_mcp_plan_short_takes_a_plain_text_script_like_http(env, vg):
+    result = mcp_call("plan_short", {"script": SCRIPT, "id": "t3", "title": "夜市",
+                                     "music": "calm piano", "wait": 60})
+    assert result["isError"] is False, result
+    body = result["structuredContent"]
+    assert body["done"] and body["short"]["id"] == "t3"
+    out = body["job"]["result"]["manifest"]
+    assert out["title"] == "夜市" and len(out["scenes"]) == 2
+    assert all(scene["clip"]["asset_id"] for scene in out["scenes"])
+    assert out["music"]["asset_id"]
+    assert [s["keywords"] for s in vg.searches if s["platform"] != "music"][0] == [
+        "night market soup", "steaming bowl"]
+
+
+def test_mcp_plan_short_script_mistakes_are_reported_before_anything_runs(env, vg):
+    for args, message in [
+        ({"script": SCRIPT}, "缺少 id"),
+        ({"script": SCRIPT, "id": "Bad Id"}, "不是合法的作品 id"),
+        ({"script": 5, "id": "t3"}, "script 要是字串"),
+        ({"script": " \n ", "id": "t3"}, "腳本是空的"),
+        ({"script": SCRIPT, "id": "t3", "manifest": draft()}, "只能給一個"),
+        ({"id": "t3"}, "缺少 manifest 或 script"),
+        ({}, "缺少 manifest 或 script"),
+    ]:
+        result = mcp_call("plan_short", args)
+        assert result["isError"], args
+        assert message in result["structuredContent"]["error"]["message"], args
+    assert vg.searches == []
+
+
+def test_mcp_plan_short_schema_no_longer_requires_a_manifest():
+    tool = next(t for t in mcp.TOOLS if t["name"] == "plan_short")
+    assert tool["inputSchema"]["required"] == []
+    assert {"manifest", "script", "id"} <= set(tool["inputSchema"]["properties"])
+
+
 def test_mcp_plan_short_returns_the_manifest_and_report_and_is_listed(env, vg):
     assert "plan_short" in mcp.HANDLERS and "plan_short" in mcp.INSTRUCTIONS
     reply = mcp.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {

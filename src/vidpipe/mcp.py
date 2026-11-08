@@ -56,6 +56,8 @@ GUIDE_TAIL = """
 - 還沒挑素材：場景給 `query`（英文關鍵字效果最好）代替 `clip`，音樂給 `music.query`，
   用 plan_short 交給 vidpipe 挑；回來的 `manifest` 可直接 make_short，`report` 列出每個場景
   挑了誰、為什麼、前幾名備選（想換就改 `asset_id`）。
+- 手上只有腳本（空白行隔開場景，「關鍵字：a, b」那行是 query）：plan_short 給 `script` 與 `id`
+  就行，不用先自己轉成 manifest。
 - 流程：validate_manifest（不呼叫 TTS）→ make_short。
   只想調整某一步：run_step（narrate／render／cover／credits）。
 """
@@ -81,13 +83,25 @@ TOOLS: list[dict[str, Any]] = [
      "inputSchema": _obj({"manifest": _MANIFEST}, ["manifest"])},
     {"name": "plan_short",
      "description": "草稿 → 搜尋並挑素材與音樂 → 可以直接 make_short 的 manifest。"
-                    "草稿就是 manifest，只是場景可以用 query（搜尋關鍵字，英文最好）代替 clip，"
-                    "music 也可以給 query。規則：授權明確優先、長度夠、直式優先；"
+                    "草稿可以是 manifest（場景用 query 搜尋關鍵字代替 clip，英文最好，"
+                    "music 也可以給 query），也可以是純文字腳本（給 script 與 id，不給 manifest）："
+                    "空白行隔開場景，「關鍵字：a, b」那行是 query。"
+                    "規則：授權明確優先、長度夠、直式優先；"
                     "結果的 report 列出選擇與備選。只搜尋，不呼叫 TTS、不下載。",
      "inputSchema": _obj({"manifest": {"type": "object",
                                        "description": "草稿：manifest 加上 query、search，"
                                                       "見 manifest_guide"},
-                          "wait": _WAIT}, ["manifest"])},
+                          "script": {"type": "string",
+                                     "description": "純文字腳本；用它就要給 id，不要給 manifest"},
+                          "id": {"type": "string", "description": "script 用：作品 id"},
+                          "title": {"type": "string", "description": "script 用：標題"},
+                          "music": {"type": "string",
+                                    "description": "script 用：背景音樂的搜尋關鍵字"},
+                          "allow_unknown_license": {"type": "boolean",
+                                                    "description": "script 用：授權不明的也考慮"},
+                          "platform": {"type": "string", "description": "script 用：素材平台"},
+                          "orientation": {"type": "string", "description": "script 用：方向"},
+                          "wait": _WAIT})},
     {"name": "make_short",
      "description": "一次做完：合成旁白 → 排時間軸 → 渲染成 9:16 mp4 → 封面 → credits.md。"
                     "一支片同時只能有一個工作。回 job 與 short（檔案網址）；"
@@ -190,6 +204,14 @@ def _launch(op: str, args: dict[str, Any]) -> Any:
 
 
 def _tool_plan_short(args: dict[str, Any]) -> Any:
+    if "script" in args:                         # 純文字腳本：與 `POST /api/plan` 同一條路
+        if "manifest" in args:
+            raise BadInput("manifest 與 script 只能給一個",
+                           hint="已經有 manifest 就不用 script；只有腳本就給 script 與 id")
+        args = {**args, "manifest": shorts.draft_from_body(args)}
+    elif "manifest" not in args:
+        raise BadInput("缺少 manifest 或 script", hint="manifest 寫法見 manifest_guide；"
+                                                      "只有腳本就給 script 與 id")
     return _launch("plan", args)
 
 

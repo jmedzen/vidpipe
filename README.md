@@ -392,7 +392,7 @@ claude mcp add --transport http vidpipe http://localhost:8320/mcp \
 |---|---|
 | `manifest_guide` | manifest 的寫法、欄位與範例（第一次做片先看） |
 | `validate_manifest` | 檢查 manifest（不呼叫 TTS、不碰素材）：分句、字數、粗估長度；寫錯回欄位路徑 |
-| `plan_short` | 草稿（場景給 `query`）→ 搜尋並挑素材與音樂 → 可以直接 `make_short` 的 manifest 與選片報告 |
+| `plan_short` | 草稿（場景給 `query`）→ 搜尋並挑素材與音樂 → 可以直接 `make_short` 的 manifest 與選片報告。也收純文字腳本：給 `script` 與 `id`（選填 `title`、`music`、`allow_unknown_license`、`platform`、`orientation`），不給 `manifest` |
 | `make_short` | 一次做完：旁白 → 時間軸 → 渲染 → 封面 → credits。回 job 與成品 `url` |
 | `run_step` | 只做一步：`narrate`／`render`／`cover`（可帶 `at`、`text`）／`credits` |
 | `get_job`／`cancel_job` | 查工作（可帶 `wait` 等它做完）／取消 |

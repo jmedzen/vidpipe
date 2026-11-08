@@ -38,6 +38,8 @@
 
 `plan_short`（`vidpipe plan draft.json -o shorts.json`、`POST /api/plan`）。純文字腳本也行：
 空白行隔開場景，「關鍵字：a, b」那行是 query（見 `examples/taipei-night/script.txt`）。
+CLI 是 `vidpipe plan script.txt`；HTTP 與 MCP 直接把腳本放進 `script`、作品 id 放 `id`
+（`plan_short {"script": "…", "id": "taipei-night-01"}`），不用先轉成 manifest。
 
 回來的 `manifest` 是完整的、可以直接做；**但要看 `report`**：
 
