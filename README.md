@@ -5,10 +5,10 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 素材：[vidgrab](https://github.com/jmedzen/vidgrab)（B 站／YouTube／Pexels／Pixabay，帶授權資訊）
 - 旁白：audio.cpp 本機 TTS（任何 OpenAI 風格的 `/v1/audio/speech` 都行，例如 ttsgrab）
 - 渲染：ffmpeg（9:16 重構圖、統一編碼、字幕、混音）
-- 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
+- 給 AI agent 用：CLI（stdout 只有 JSON）、HTTP API、MCP（stdio 與 HTTP 兩種）
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`cover`、`credits`；HTTP API 也能送件與取成品。
+> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`cover`、`credits`；HTTP API 也能送件與取成品；`mcp` 讓 Claude Code 之類的 client 直接用。
 
 ## 快速開始
 
@@ -310,13 +310,46 @@ curl -s -H "$H" -o night.mp4 localhost:8320/file/taipei-night-01/out/taipei-nigh
 - **注意**：manifest 的 `clip.path`、`music.path` 是**伺服器上**的路徑，拿得到 token 的人就能讓伺服器讀它能讀的檔案。
   只在信任的環境開放（預設綁 127.0.0.1；對外一定要設 token），或只用 `asset_id`。
 
+### MCP：讓 Claude Code 直接用 vidpipe
+
+跟 vidgrab 一樣，不依賴 `mcp` 套件，兩種傳輸共用同一份工具：
+
+```bash
+# stdio：Claude Code 以子行程啟動（vidpipe 與 Claude Code 在同一台機器）
+claude mcp add vidpipe -- vidpipe mcp
+# HTTP：連到跑著的 `vidpipe serve`（Docker、另一台機器）；有設 token 就帶上
+claude mcp add --transport http vidpipe http://localhost:8320/mcp \
+  --header "Authorization: Bearer $VIDPIPE_API_TOKEN"
+```
+
+| 工具 | 用途 |
+|---|---|
+| `manifest_guide` | manifest 的寫法、欄位與範例（第一次做片先看） |
+| `validate_manifest` | 檢查 manifest（不呼叫 TTS、不碰素材）：分句、字數、粗估長度；寫錯回欄位路徑 |
+| `make_short` | 一次做完：旁白 → 時間軸 → 渲染 → 封面 → credits。回 job 與成品 `url` |
+| `run_step` | 只做一步：`narrate`／`render`／`cover`（可帶 `at`、`text`）／`credits` |
+| `get_job`／`cancel_job` | 查工作（可帶 `wait` 等它做完）／取消 |
+| `list_shorts`／`get_short` | 所有作品／單一作品的狀態、素材出處、檔案網址 |
+| `check_setup` | `doctor`：ffmpeg、vidgrab、TTS 就緒了沒；沒就緒**不算錯誤**，看 `ok` 與 `checks` |
+
+- 工具只回 JSON 與網址，**不回影片內容**：成品用 `get_short` 的 `files[].url`（接在 vidpipe 的位址後面，
+  支援 `Range`），同一台機器時也可以直接用工作結果裡的 `path`。
+- **長工作的節奏**：`make_short`／`run_step` 預設最多等 `wait` 秒（60，上限 600）；沒做完就回
+  `done: false` 與 job id，之後用 `get_job`（帶 `wait` 就會等）回頭查。stdio 每個呼叫各跑一條執行緒，
+  所以 `make_short` 還在等的時候 `cancel_job`、`get_job` 照樣回得來。
+- **失敗的呼叫回 `isError: true`**，內容是跟 CLI 同一套的結構化錯誤（`code`、`message`、`retryable`、`hint`）；
+  失敗或被取消的工作也算（`error` 是工作失敗的原因）。
+- HTTP 傳輸只有 `POST /mcp`（一則或一批 JSON-RPC；通知回 202）；`GET /mcp` 回 405（沒有 server 主動推送）。
+  認證、`Host` 白名單與 Origin 檢查跟 `/api/*` 相同。
+- stdio 時 stdout 只有協定訊息，其餘（log、追蹤）一律走 stderr。
+
 **安全**：這個服務會呼叫 TTS、讀寫 work 目錄，所以預設只綁 `127.0.0.1`。
 
 | 情況 | 行為 |
 |---|---|
 | 綁非本機位址，沒加 `--allow-lan` | 拒絕啟動（exit 2） |
 | 綁非本機位址，沒設 `VIDPIPE_API_TOKEN` | 拒絕啟動；外層已有保護時才用 `--no-auth` |
-| 設了 token | `/api/*` 要 `Authorization: Bearer`；瀏覽器開一次 `/?token=…` 換 HttpOnly、SameSite=Strict cookie。外殼、`/static/*`、`/api/version` 公開 |
+| 設了 token | `/api/*`、`/file/*`、`/mcp` 要 `Authorization: Bearer`；瀏覽器開一次 `/?token=…` 換 HttpOnly、SameSite=Strict cookie。外殼、`/static/*`、`/api/version` 公開 |
 | `Host` 標頭 | 只認本機名稱與 IP 字面值（擋 DNS rebinding）；用網域名稱連要放進 `VIDPIPE_ALLOWED_HOSTS`（逗號分隔） |
 | 寫入類請求 | 帶了 `Origin`／`Referer` 就必須跟 `Host` 同源（擋 CSRF）；curl 這類沒帶的放行 |
 

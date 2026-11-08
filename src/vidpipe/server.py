@@ -1,7 +1,7 @@
 """網頁伺服器：標準庫 `ThreadingHTTPServer`，做法跟 vidgrab 一致。
 
 同一支程式提供網頁外殼、`/static/*`、REST API（JSON）、`/file/*`（成品與中間檔，支援 Range）。
-之後的 `/mcp` 也掛在這裡。
+`POST /mcp` 是 MCP（Streamable HTTP）的入口，工具實作在 `mcp.py`，認證與 `/api/*` 相同。
 
 安全（這個服務會呼叫 TTS、讀寫 work 目錄，不能裸奔）：
 - 預設只綁 127.0.0.1。綁到別的位址必須明講 `--allow-lan`，而且要設 `VIDPIPE_API_TOKEN`
@@ -34,6 +34,7 @@ from typing import Any
 
 from . import config as config_mod
 from . import jobs as jobs_mod
+from . import mcp as mcp_mod
 from . import shorts as shorts_mod
 from .errors import BadInput, VidpipeError, from_exception
 from .version import __version__, build, full_version
@@ -277,6 +278,8 @@ class Handler(BaseHTTPRequestHandler):
                     config_mod.load(), urllib.parse.unquote(route[len("/api/short/"):]))})
             elif route.startswith("/file/"):
                 self._file(route[len("/file/"):])
+            elif route == "/mcp":
+                self._mcp_only_post()
             elif route.startswith("/api/"):
                 self._error(f"沒有這個端點：{route}", status=404, code="not_found")
             else:
@@ -302,6 +305,11 @@ class Handler(BaseHTTPRequestHandler):
             elif self.command == "POST" and len(parts) == 2 and parts[0] == "api" \
                     and parts[1] in shorts_mod.OPS:
                 self._start(parts[1])
+            elif route == "/mcp":
+                if self.command == "POST":
+                    self._mcp()
+                else:
+                    self._mcp_only_post()
             elif route.startswith("/api/"):
                 self._error(f"沒有這個端點：{route}", status=404, code="not_found")
             else:
@@ -311,18 +319,21 @@ class Handler(BaseHTTPRequestHandler):
 
     do_POST = do_PUT = do_DELETE = _write  # noqa: N815
 
+    def _raw_body(self) -> bytes:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise BadInput("Content-Length 不對") from None
+        if length < 0 or length > MAX_BODY:
+            raise BadInput(f"請求太大（上限 {MAX_BODY // 1024 // 1024} MB）")
+        return self.rfile.read(length) if length else b""
+
     def _body(self) -> dict[str, Any]:
         """請求本體的 JSON 物件。太大、不是 JSON、不是物件都回 400。"""
         cached = getattr(self, "_cached_body", None)
         if cached is not None:
             return cached
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            raise BadInput("Content-Length 不對") from None
-        if length > MAX_BODY:
-            raise BadInput(f"請求太大（上限 {MAX_BODY // 1024 // 1024} MB）")
-        raw = self.rfile.read(length) if length else b""
+        raw = self._raw_body()
         try:
             data = json.loads(raw.decode("utf-8") or "{}")
         except (UnicodeDecodeError, ValueError):
@@ -337,6 +348,24 @@ class Handler(BaseHTTPRequestHandler):
         if "manifest" not in body:
             raise BadInput("缺少 manifest", hint='本體格式：{"manifest": {…}}')
         return body["manifest"]
+
+    def _mcp_only_post(self) -> None:
+        self._error("MCP 端點只收 POST（沒有 server 主動推送的串流）", status=405,
+                    code="method_not_allowed", headers={"Allow": "POST"})
+
+    def _mcp(self) -> None:
+        """POST /mcp：一則 JSON-RPC 訊息或一批。只有通知就回 202 空本體，其餘回 200 JSON。"""
+        raw = self._raw_body()
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            self._json(mcp_mod.rpc_error(None, -32700, "Parse error"), 400)
+            return
+        reply = mcp_mod.handle_payload(payload)
+        if reply is None:
+            self._send(202, b"", "text/plain; charset=utf-8")
+        else:
+            self._json(reply)
 
     def _start(self, op: str) -> None:
         """POST /api/<op>：{"manifest": {...}}（cover 另有 at、text）→ 202 與 job id。"""
