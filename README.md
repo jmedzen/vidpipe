@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`；旁白、字幕依序在後續 PR。
+> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`；旁白、字幕依序在後續 PR。
 
 ## 快速開始
 
@@ -43,6 +43,28 @@ vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_
 | `subtitle_langs` | `zh-TW` | `zh-TW` 或 `zh-TW+en`（雙語） |
 | `burn_subtitles` | `true` | 字幕是否燒進影片；關掉只輸出字幕檔 |
 | `work_dir` / `out_dir` | `work` / `out` | 中間產物與成品 |
+| `record_jobs` | `true` | 長指令是否在 `work_dir/_jobs` 留下紀錄（網頁看得到）；關掉就不寫 |
+
+## 工作紀錄：jobs／job／cancel
+
+`normalize`、`trim`、`fill`、`concat`（之後的旁白、渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
+**不管是從終端機、API 還是 MCP 發起的**，網頁的「工作」頁都看得到。輸出的 JSON 多一個 `job`（記錄關掉時是 `null`）。
+
+```bash
+vidpipe normalize in.mp4 -o out.mp4    # → {"ok": true, "job": "20261108-135347-da34df", "output": {…}}
+vidpipe jobs --status running          # 清單（新的在前）
+vidpipe job 20261108-135347-da34df     # 狀態、進度、階段、錯誤，加上事件（--after N 只要 N 之後的）
+vidpipe cancel 20261108-135347-da34df  # 取消還在跑的工作
+```
+
+- 狀態：`running`、`succeeded`、`failed`、`cancelled`、`interrupted`。**`interrupted`** 是狀態檔寫著 running、但行程已經不在
+  （被 `kill -9`、機器重開）時對外顯示的狀態，不會改寫檔案。
+- 進度來自 ffmpeg 的 `-progress`，所以進度條是真的，不是假動畫。失敗時帶結構化錯誤（`code`／`message`／`hint`）。
+- 取消 = 對該行程送 `SIGTERM`：ffmpeg 被殺掉、`.partial` 暫存檔清掉、狀態記成 `cancelled`。
+  **只在同一台機器上做得到**，而且送之前會確認那個 pid 現在真的是 vidpipe（pid 會被重用，不確認可能殺到別的行程）。
+- 記錄是盡力而為：`work_dir` 寫不進去時指令照跑，只是不留紀錄。不想留紀錄就 `VIDPIPE_RECORD_JOBS=false`。
+- **CLI 與伺服器要看同一個 `work_dir`**：預設的 `work` 是相對路徑（相對於執行當下的目錄），
+  想讓不同地方跑的指令都出現在同一個網頁，請用絕對路徑設 `VIDPIPE_WORK_DIR`。
 
 ## 網頁介面
 
@@ -51,12 +73,20 @@ vidpipe serve                      # http://127.0.0.1:8320，會開預設瀏覽�
 vidpipe serve --port 8080
 ```
 
-目前有兩頁：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查；失敗時顯示原因與 hint）與
-**設定**（目前生效的設定，token 遮蔽）。作品列表、進度、成品預覽隨後續 PR 加入，規劃見
-`vidpipe-web-ui-plan.md`。
+目前有三頁：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查，失敗時顯示原因與 hint；
+下方是最近的工作）、**工作**（每個長指令的狀態、進度條、階段、參數、結果、事件記錄、失敗原因，進行中的可以取消）、
+**設定**（目前生效的設定，token 遮蔽）。作品列表、成品預覽隨後續 PR 加入，規劃見 `vidpipe-web-ui-plan.md`。
 
-API（皆為 JSON，錯誤格式同 CLI）：`GET /api/version`（公開，給 healthcheck）、`GET /api/doctor?skip=…`、
-`GET /api/config`。
+API（皆為 JSON，錯誤格式同 CLI）：
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/api/version` | 版本與 build（公開，給 healthcheck） |
+| GET | `/api/doctor?skip=…` | 等同 `vidpipe doctor` |
+| GET | `/api/config` | 生效設定（祕密遮蔽） |
+| GET | `/api/jobs?status=&limit=` | 工作清單（新的在前，最多 200） |
+| GET | `/api/job/{id}[/events]?after=N` | 單一工作與事件（`after` 之後的） |
+| POST | `/api/job/{id}/cancel` | 取消還在跑的工作 |
 
 **安全**：這個服務會呼叫 TTS、讀寫 work 目錄，所以預設只綁 `127.0.0.1`。
 

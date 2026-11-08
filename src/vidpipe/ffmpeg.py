@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -30,18 +31,64 @@ def require() -> None:
                                     hint="安裝 ffmpeg（macOS：brew install ffmpeg）")
 
 
-def run(args: list[str], *, timeout: float = 600.0) -> None:
-    """跑一次 ffmpeg（`args` 不含 ffmpeg 本身）。失敗丟 RenderError。"""
+def _tail(stderr: str, code: int) -> str:
+    tail = [ln for ln in (stderr or "").strip().splitlines() if ln.strip()][-4:]
+    return " | ".join(tail) or f"exit {code}"
+
+
+def run(args: list[str], *, timeout: float = 600.0, duration: float | None = None) -> None:
+    """跑一次 ffmpeg（`args` 不含 ffmpeg 本身）。失敗丟 RenderError。
+
+    `duration`（輸出的預期秒數）有給、而且目前有工作在記錄時，會讀 `-progress` 回報進度，
+    網頁上的進度條就是這樣來的；沒有工作在記錄就走最單純的路徑。
+    """
+    from . import jobs
+
     require()
-    cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-v", "error", "-y", *args]
+    rec = jobs.active() if duration and duration > 0 else None
+    cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-v", "error", "-y"]
+    if rec:
+        cmd += ["-progress", "pipe:1", "-nostats"]
+    cmd += args
+    if rec is None:
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                                  check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise Timeout(f"ffmpeg 逾時（>{int(timeout)}s）") from exc
+        if proc.returncode != 0:
+            raise RenderError("ffmpeg 失敗：" + _tail(proc.stderr, proc.returncode),
+                              hint="確認輸入檔能播放；用 `vidpipe probe` 看它的串流資訊")
+        return
+
+    assert duration is not None
+    proc_p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    errors: list[str] = []
+    drain = threading.Thread(target=lambda: errors.append(proc_p.stderr.read()),  # type: ignore[union-attr]
+                             daemon=True)
+    drain.start()
+    timed_out = threading.Event()
+    timer = threading.Timer(timeout, lambda: (timed_out.set(), proc_p.kill()))
+    timer.start()
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise Timeout(f"ffmpeg 逾時（>{int(timeout)}s）") from exc
-    if proc.returncode != 0:
-        tail = [ln for ln in (proc.stderr or "").strip().splitlines() if ln.strip()][-4:]
-        raise RenderError("ffmpeg 失敗：" + (" | ".join(tail) or f"exit {proc.returncode}"),
+        for line in proc_p.stdout:  # type: ignore[union-attr]
+            key, _, value = line.strip().partition("=")
+            if key == "out_time_us" and value.lstrip("-").isdigit():
+                rec.progress(int(value) / 1_000_000 / duration)
+        proc_p.wait()
+    except BaseException:  # 包含取消（SIGTERM → Cancelled）：先殺掉 ffmpeg 再往外丟
+        proc_p.kill()
+        proc_p.wait()
+        raise
+    finally:
+        timer.cancel()
+        drain.join(2)
+    if timed_out.is_set():
+        raise Timeout(f"ffmpeg 逾時（>{int(timeout)}s）")
+    if proc_p.returncode != 0:
+        raise RenderError("ffmpeg 失敗：" + _tail("".join(errors), proc_p.returncode),
                           hint="確認輸入檔能播放；用 `vidpipe probe` 看它的串流資訊")
+    rec.progress(1.0)
 
 
 def _fps(text: str | None) -> float | None:

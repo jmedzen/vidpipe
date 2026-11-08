@@ -279,3 +279,115 @@ def test_doctor_reports_unreachable_services_without_failing_the_request(start, 
 def test_doctor_rejects_unknown_skip(start):
     resp = start().get("/api/doctor?skip=nope")
     assert resp.status_code == 400 and _err(resp)["code"] == "bad_input"
+
+
+# ------------------------------------------------------------ 工作端點
+
+def _make_job(tmp_path, *, fail=False):
+    from vidpipe import jobs
+
+    try:
+        with jobs.JobRecorder(tmp_path / "work", "demo", args={"input": "a.mp4"}) as job:
+            job.stage("encode")
+            job.progress(0.5)
+            if fail:
+                raise BadInput("壞了", hint="換一個")
+    except BadInput:
+        pass
+    return job.id
+
+
+def test_jobs_list_get_and_events(start, tmp_path):
+    ok = _make_job(tmp_path)
+    srv = start()
+    listed = srv.get("/api/jobs").json()
+    assert listed["ok"] and [j["id"] for j in listed["jobs"]] == [ok]
+    one = srv.get(f"/api/job/{ok}").json()
+    assert one["job"]["status"] == "succeeded" and one["job"]["args"] == {"input": "a.mp4"}
+    assert [e["kind"] for e in one["events"]][0] == "start"
+    after = srv.get(f"/api/job/{ok}/events?after=2").json()
+    assert all(e["seq"] > 2 for e in after["events"]) and after["events"]
+
+
+def test_jobs_filter_and_validation(start, tmp_path):
+    _make_job(tmp_path)
+    bad = _make_job(tmp_path, fail=True)
+    srv = start()
+    failed = srv.get("/api/jobs?status=failed").json()["jobs"]
+    assert [j["id"] for j in failed] == [bad] and failed[0]["error"]["hint"] == "換一個"
+    assert srv.get("/api/jobs?status=nope").status_code == 400
+    assert srv.get("/api/jobs?limit=abc").status_code == 400
+    assert len(srv.get("/api/jobs?limit=1").json()["jobs"]) == 1
+
+
+def test_job_ids_are_validated_and_missing_is_404(start):
+    srv = start()
+    for path in ("/api/job/..%2Fsecret", "/api/job/not-an-id", "/api/job/"):
+        assert srv.get(path).status_code == 400, path
+    assert srv.get("/api/job/20260101-000000-abcdef").status_code == 404
+    assert _err(srv.get("/api/job/20260101-000000-abcdef"))["code"] == "not_found"
+
+
+def test_job_endpoints_need_the_token(start, tmp_path):
+    job_id = _make_job(tmp_path)
+    srv = start(token="s3cret")
+    assert srv.get("/api/jobs").status_code == 401
+    assert srv.get(f"/api/job/{job_id}").status_code == 401
+    assert srv.post(f"/api/job/{job_id}/cancel").status_code == 401
+    head = {"Authorization": "Bearer s3cret"}
+    assert srv.get("/api/jobs", headers=head).status_code == 200
+
+
+def _running_vidpipe_like_process(tmp_path):
+    import subprocess
+    import sys
+    import time
+
+    from vidpipe import jobs
+
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "vidpipe-fake"])
+    deadline = time.time() + 5
+    while time.time() < deadline and not jobs._is_vidpipe_process(proc.pid):
+        time.sleep(0.05)
+    import json as _json
+    import platform
+
+    job_id = "20260101-000000-abcdef"
+    (tmp_path / "work" / "_jobs").mkdir(parents=True)
+    (tmp_path / "work" / "_jobs" / f"{job_id}.json").write_text(_json.dumps(
+        {"id": job_id, "kind": "demo", "status": "running", "pid": proc.pid,
+         "host": platform.node(), "stages": [], "args": {}}))
+    return proc, job_id
+
+
+def test_cancel_endpoint_stops_the_process(start, tmp_path):
+    proc, job_id = _running_vidpipe_like_process(tmp_path)
+    try:
+        srv = start()
+        resp = srv.post(f"/api/job/{job_id}/cancel")
+        assert resp.status_code == 200 and resp.json()["signalled"] is True
+        proc.wait(timeout=10)
+        # 再取消一次：行程已經不在了，是衝突而不是 500
+        again = srv.post(f"/api/job/{job_id}/cancel")
+        assert again.status_code == 409 and _err(again)["code"] == "conflict"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
+
+def test_cancel_endpoint_rejects_cross_site_requests(start, tmp_path):
+    proc, job_id = _running_vidpipe_like_process(tmp_path)
+    try:
+        srv = start()
+        resp = srv.post(f"/api/job/{job_id}/cancel", headers={"Origin": "http://evil.example"})
+        assert resp.status_code == 403
+        assert proc.poll() is None  # 沒被殺
+        assert srv.get(f"/api/job/{job_id}/cancel").status_code == 404  # GET 不能取消
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_cancel_unknown_job_is_404(start):
+    resp = start().post("/api/job/20260101-000000-abcdef/cancel")
+    assert resp.status_code == 404

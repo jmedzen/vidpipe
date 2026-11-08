@@ -17,6 +17,15 @@ vidpipe 是 Shorts 流水線：腳本 → 旁白與字幕 → 素材 → 9:16 �
 - **9:16 與統一編碼屬於這個 repo**，不要塞回 vidgrab（vidgrab 只負責找與取）。
 - 祕密（token、API key）只進環境變數；`vidpipe config` 一律遮蔽，測試要驗證不外洩。
 
+## 工作紀錄
+
+任何會跑超過一兩秒的指令都要過 `jobs.JobRecorder`（CLI 用 `cli._recorded`），讓網頁與 agent 看得到進度：
+- 渲染程式碼不直接依賴記錄：用 `jobs.stage("名稱", "說明")` 開階段，沒有人在記錄時它什麼都不做；
+- 呼叫 `ffmpeg.run(args, duration=預期輸出秒數)`，進度就會自動回報；沒給 `duration` 就不回報；
+- 記錄不能讓指令失敗：寫檔錯誤一律吞掉並停用記錄（`JobRecorder.enabled = False`）；
+- 取消走 `SIGTERM → jobs.Cancelled`，`ffmpeg.run` 會先殺掉子行程再往外丟；暫存檔用 `finally` 清掉；
+- 伺服器送 `SIGTERM` 前一定先確認 pid 是 vidpipe（`jobs._is_vidpipe_process`），不要放寬。
+
 ## 網頁介面
 
 `vidpipe serve`：標準庫 `ThreadingHTTPServer`（`server.py`）＋ React 19／TypeScript／Vite（`web/`），

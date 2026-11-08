@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from . import config as config_mod
@@ -43,38 +44,77 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def _recorded(kind: str, params: dict[str, Any], run: Callable[[], dict[str, Any]]) -> int:
+    """跑一個長指令並留下工作紀錄（網頁看得到進度）；輸出多一個 `job`（沒記錄就是 null）。"""
+    from . import jobs
+
+    cfg = config_mod.load()
+    with jobs.JobRecorder(cfg.work_dir, kind, args=params, enabled=cfg.record_jobs) as job:
+        out = run()
+        keys = ("path", "duration", "width", "height", "fps", "looped", "size_bytes")
+        job.set_result({k: out[k] for k in keys if k in out})
+    emit({"ok": True, "job": job.id if job.enabled else None, "output": out})
+    return 0
+
+
 def cmd_normalize(args: argparse.Namespace) -> int:
     from . import video
 
     spec = video.OutputSpec.for_aspect(args.aspect, fps=args.fps)
-    out = video.normalize(args.input, args.output, spec, fit=args.fit, focus=args.focus,
-                          audio=args.audio)
-    emit({"ok": True, "output": out})
-    return 0
+    params = {"input": args.input, "output": args.output, "aspect": args.aspect,
+              "fit": args.fit, "focus": args.focus, "fps": args.fps, "audio": args.audio}
+    return _recorded("normalize", params, lambda: video.normalize(
+        args.input, args.output, spec, fit=args.fit, focus=args.focus, audio=args.audio))
 
 
 def cmd_trim(args: argparse.Namespace) -> int:
     from . import edit
 
-    out = edit.trim(args.input, args.output, args.start, args.duration)
-    emit({"ok": True, "output": out})
-    return 0
+    params = {"input": args.input, "output": args.output, "start": args.start,
+              "duration": args.duration}
+    return _recorded("trim", params, lambda: edit.trim(
+        args.input, args.output, args.start, args.duration))
 
 
 def cmd_fill(args: argparse.Namespace) -> int:
     from . import edit
 
-    out = edit.fill(args.input, args.output, args.duration, start=args.start,
-                    loop=not args.no_loop)
-    emit({"ok": True, "output": out})
-    return 0
+    params = {"input": args.input, "output": args.output, "start": args.start,
+              "duration": args.duration, "loop": not args.no_loop}
+    return _recorded("fill", params, lambda: edit.fill(
+        args.input, args.output, args.duration, start=args.start, loop=not args.no_loop))
 
 
 def cmd_concat(args: argparse.Namespace) -> int:
     from . import edit
 
-    out = edit.concat(args.inputs, args.output, copy=args.copy)
-    emit({"ok": True, "output": out})
+    params = {"inputs": list(args.inputs), "output": args.output, "copy": args.copy}
+    return _recorded("concat", params, lambda: edit.concat(
+        args.inputs, args.output, copy=args.copy))
+
+
+def cmd_jobs(args: argparse.Namespace) -> int:
+    from . import jobs
+
+    cfg = config_mod.load()
+    emit({"ok": True, "jobs": jobs.list_jobs(cfg.work_dir, limit=args.limit, status=args.status)})
+    return 0
+
+
+def cmd_job(args: argparse.Namespace) -> int:
+    from . import jobs
+
+    cfg = config_mod.load()
+    job = jobs.get_job(cfg.work_dir, args.id)
+    emit({"ok": True, "job": job, "events": jobs.read_events(cfg.work_dir, args.id, args.after)})
+    return 0
+
+
+def cmd_cancel(args: argparse.Namespace) -> int:
+    from . import jobs
+
+    cfg = config_mod.load()
+    emit({"ok": True, "job": jobs.request_cancel(cfg.work_dir, args.id)})
     return 0
 
 
@@ -136,6 +176,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--copy", action="store_true",
                    help="不重編碼（快、零損失；AAC 接縫可能有幾十毫秒誤差）")
     p.set_defaults(func=cmd_concat)
+
+    p = sub.add_parser("jobs", help="工作紀錄清單（新的在前）")
+    p.add_argument("--status", help="running／succeeded／failed／cancelled／interrupted")
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=cmd_jobs)
+
+    p = sub.add_parser("job", help="單一工作的狀態與事件")
+    p.add_argument("id")
+    p.add_argument("--after", type=int, default=0, help="只要 seq 大於這個值的事件")
+    p.set_defaults(func=cmd_job)
+
+    p = sub.add_parser("cancel", help="取消還在跑的工作（同一台機器上）")
+    p.add_argument("id")
+    p.set_defaults(func=cmd_cancel)
 
     p = sub.add_parser("serve", help="開網頁介面與 REST API（狀態、進度、預覽）")
     p.add_argument("--host", help="綁定位址，預設 127.0.0.1（或 VIDPIPE_HOST）")

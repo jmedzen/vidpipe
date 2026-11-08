@@ -15,9 +15,19 @@ export class ApiFailure extends Error {
 }
 
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: 'GET' }, signal)
+}
+
+/** 寫入類請求。瀏覽器會自動帶 Origin，伺服器據此擋跨站請求。 */
+export async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: 'POST' }, signal)
+}
+
+async function requestJson<T>(path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
   let resp: Response
   try {
     resp = await fetch(path, {
+      ...init,
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
       signal,

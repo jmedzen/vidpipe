@@ -35,7 +35,7 @@ export interface Doctor {
   skipped: string[]
 }
 
-export type Level = 'ok' | 'warn' | 'bad'
+export type Level = 'ok' | 'warn' | 'bad' | 'run'
 
 export type ThemeKind = 'dark' | 'light'
 
@@ -45,4 +45,54 @@ export interface ThemeDef {
   kind: ThemeKind
   dot: string
   accent: string
+}
+
+export type JobStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+
+export interface JobStage {
+  name: string
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
+  detail: string
+  started_at: string
+  finished_at: string | null
+}
+
+export interface Job {
+  id: string
+  kind: string
+  short_id: string | null
+  status: JobStatus
+  args: Record<string, unknown>
+  pid: number | null
+  host: string
+  created_at: string
+  started_at: string
+  finished_at: string | null
+  updated_at: string
+  stage: string | null
+  stages: JobStage[]
+  progress: number | null
+  result: Record<string, unknown> | null
+  error: ApiErrorBody | null
+}
+
+export interface JobEvent {
+  seq: number
+  t: number
+  kind: string
+  message: string
+  level?: string
+  hint?: string
+  code?: string
+}
+
+export interface JobList {
+  ok: true
+  jobs: Job[]
+}
+
+export interface JobDetail {
+  ok: true
+  job: Job
+  events: JobEvent[]
 }
