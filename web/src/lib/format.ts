@@ -39,7 +39,7 @@ export const KIND_TEXT: Record<string, string> = {
   trim: '裁切',
   fill: '湊成指定長度',
   concat: '串接',
-  make: '一次做完',
+  make: '做成片',
   narrate: '旁白與時間軸',
   render: '渲染',
   cover: '封面',
@@ -104,12 +104,14 @@ export function clock(ms: number | null): string {
 
 export const SHORT_STAGE_TEXT: Record<ShortStage, string> = {
   new: '只有草稿',
+  planned: '素材已挑好',
   narrated: '已有旁白',
   rendered: '已完成',
 }
 
 export const SHORT_STAGE_LEVEL: Record<ShortStage, 'ok' | 'note' | 'plain'> = {
   new: 'plain',
+  planned: 'note',
   narrated: 'note',
   rendered: 'ok',
 }
@@ -141,4 +143,21 @@ export function licenseTone(kind: string | undefined): LicenseTone {
   if (kind === 'free') return 'ok'
   if (kind === 'free-attribution') return 'note'
   return 'warn'
+}
+
+export const ORIENT_TEXT: Record<string, string> = {
+  portrait: '直式',
+  landscape: '橫式',
+  square: '正方形',
+  unknown: '比例不明',
+}
+
+/** 進行中的工作用一句現在進行式；沒列的就「正在」加上名稱。 */
+export const RUNNING_TEXT: Record<string, string> = {
+  make: '正在做成片',
+  narrate: '正在合成旁白',
+  render: '正在渲染',
+  cover: '正在做封面',
+  credits: '正在整理素材清單',
+  plan: '正在挑素材',
 }

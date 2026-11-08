@@ -3,16 +3,18 @@ import { CopyButton } from '../components/CopyButton'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { JobDot } from '../components/JobDot'
 import { ProgressBar } from '../components/ProgressBar'
-import { ApiFailure, getText, useApi } from '../lib/api'
+import { ApiFailure, deleteJson, getText, postJson, useApi } from '../lib/api'
 import {
-  JOB_TEXT, SHORT_STAGE_LEVEL, SHORT_STAGE_TEXT, bytesText, dateTimeIso, durationText, elapsed,
-  licenseTone, stageText, stamp,
+  JOB_TEXT, ORIENT_TEXT, RUNNING_TEXT, SHORT_STAGE_LEVEL, SHORT_STAGE_TEXT, bytesText, dateTimeIso, durationText,
+  elapsed, licenseTone, stageText, stamp,
 } from '../lib/format'
+import { useAction } from '../lib/useAction'
 import type {
-  CreditsBrief, JobBrief, JobDetail, ManifestScene, ShortDetail, ShortDetailResponse, ShortFile,
-  ShortList, ShortSources, ShortSummary, SourceCredit, TimelineScene,
+  CreditsBrief, JobBrief, JobDetail, ManifestScene, PlanCandidate, PlanPick, PlanReport,
+  ShortDetail, ShortDetailResponse, ShortFile, ShortList, ShortSources, ShortSummary, SourceCredit,
+  TimelineScene,
 } from '../types'
-import { kindText, useTick } from './Jobs'
+import { CancelButton, kindText, useTick } from './Jobs'
 
 /* ---------------------------------------------------------- 共用小元件 */
 
@@ -24,11 +26,14 @@ function StagePill({ stage }: { stage: ShortSummary['stage'] }) {
   return <Pill tone={SHORT_STAGE_LEVEL[stage]}>{SHORT_STAGE_TEXT[stage]}</Pill>
 }
 
+function LicenseBadge({ kind, label }: { kind: string | undefined; label: string | undefined }) {
+  const tone = licenseTone(kind)
+  return <Pill tone={tone}>{tone === 'warn' ? '⚠ ' : ''}{label || '授權未明'}</Pill>
+}
+
 function LicensePill({ credit }: { credit: SourceCredit }) {
   if (credit.kind === 'file') return <Pill tone="warn">⚠ 本機檔案，授權自己確認</Pill>
-  const lic = credit.license
-  const tone = licenseTone(lic?.kind)
-  return <Pill tone={tone}>{tone === 'warn' ? '⚠ ' : ''}{lic?.label || '授權未明'}</Pill>
+  return <LicenseBadge kind={credit.license?.kind} label={credit.license?.label} />
 }
 
 function CreditsPills({ credits }: { credits: CreditsBrief | null }) {
@@ -90,14 +95,18 @@ export function ShortsPage() {
           <h2>作品</h2>
           <p className="muted">work 資料夾裡每一支片現在做到哪；每 4 秒更新一次。</p>
         </div>
+        <div className="head-actions">
+          <a className="button primary" href="#/new">＋ 新增作品</a>
+        </div>
       </header>
       {list.error && <ErrorBanner error={list.error} onRetry={list.reload} />}
       {list.data && items.length === 0 && (
         <section className="card empty">
           <h3>還沒有作品</h3>
           <p className="muted">
-            從腳本開始：<code>vidpipe plan script.txt -o shorts.json</code>，
-            再 <code>vidpipe make shorts.json</code>，做出來的片會出現在這裡。
+            <a href="#/new">貼一份腳本</a>，vidpipe 會替每個場景挑素材；也可以用終端機：
+            <code>vidpipe plan script.txt --id my-short -o shorts.json</code>，
+            再 <code>vidpipe make shorts.json</code>。
           </p>
         </section>
       )}
@@ -128,13 +137,13 @@ function LastFailure({ job }: { job: JobBrief }) {
   )
 }
 
-function RunningJob({ job }: { job: JobBrief }) {
+function RunningJob({ job, onChanged }: { job: JobBrief; onChanged: () => void }) {
   return (
     <section className="card" aria-label="進行中的工作">
       <div className="card-head">
         <JobDot status="running" />
         <div>
-          <h3>正在{kindText(job.kind)}</h3>
+          <h3>{RUNNING_TEXT[job.kind] ?? `正在${kindText(job.kind)}`}</h3>
           <p className="muted small">
             {job.stage ? `目前階段：${stageText(job.stage)}` : '準備中'}
             {'　'}<a href={`#/jobs/${job.id}`}>看工作紀錄</a>
@@ -142,6 +151,7 @@ function RunningJob({ job }: { job: JobBrief }) {
         </div>
       </div>
       <ProgressBar ratio={job.progress} label="工作進度" />
+      <CancelButton id={job.id} onDone={onChanged} />
     </section>
   )
 }
@@ -210,7 +220,7 @@ function ScenesPanel({ short, active, onSeek }: { short: ShortDetail; active: nu
         </div>
       )}
       {!short.timeline && rows.length > 0 && (
-        <p className="muted small note-line">還沒有旁白與時間軸，先跑 <code>vidpipe narrate</code>（或 <code>make</code>）。下面是 manifest 裡的文字。</p>
+        <p className="muted small note-line">還沒有旁白與時間軸；按右上角的「做成片」會一起做。下面是 manifest 裡的文字。</p>
       )}
       {rows.length === 0 && <section className="card empty"><p className="muted">這支片沒有場景。</p></section>}
       {rows.map((row) => (
@@ -477,10 +487,115 @@ function JobsPanel({ jobs }: { jobs: JobBrief[] }) {
   )
 }
 
+/* ---------------------------------------------------------- 分頁：挑素材（plan 的報告） */
+
+function CandidateLine({ cand }: { cand: PlanCandidate }) {
+  return (
+    <div className="cand">
+      {cand.webpage_url
+        ? <a href={cand.webpage_url} target="_blank" rel="noreferrer">{cand.title || cand.asset_id}</a>
+        : <span>{cand.title || cand.asset_id}</span>}
+      <div className="pills">
+        <LicenseBadge kind={cand.license.kind} label={cand.license.label} />
+        <Pill>{ORIENT_TEXT[cand.orientation] ?? cand.orientation}</Pill>
+        {cand.duration ? <Pill>{cand.duration} 秒</Pill> : null}
+        {cand.author && <span className="muted small">{cand.author}</span>}
+        <code>{cand.asset_id}</code>
+      </div>
+      {cand.why && <p className="muted small">{cand.why}</p>}
+    </div>
+  )
+}
+
+function Alternatives({ items }: { items: PlanCandidate[] }) {
+  if (items.length === 0) return null
+  return (
+    <details className="alts">
+      <summary>備選 {items.length} 個</summary>
+      {items.map((c) => <CandidateLine key={c.asset_id} cand={c} />)}
+    </details>
+  )
+}
+
+function PickBody({ pick, none }: { pick: PlanPick & { clip?: 'given' }; none: string }) {
+  return (
+    <>
+      {pick.clip === 'given' && <p className="muted small">這個場景原本就指定了素材，沒有動它。</p>}
+      {pick.chosen && <CandidateLine cand={pick.chosen} />}
+      {!pick.chosen && pick.clip !== 'given' && <p className="plan-none">{none}</p>}
+      <Alternatives items={pick.alternatives ?? []} />
+    </>
+  )
+}
+
+function PlanPanel({ plan, planning, retry }: { plan: PlanReport | null; planning: boolean; retry: boolean }) {
+  if (!plan) {
+    return (
+      <section className="card empty">
+        <h3>{planning ? '正在搜尋、挑素材…' : '還沒有挑素材的結果'}</h3>
+        <p className="muted">
+          {planning ? '進度在上面；挑好之後這裡會列出每個場景選了什麼、還有哪些備選。'
+            : retry ? '處理好上面的問題之後，按右上角的「重試挑素材」。'
+              : '到「新增作品」貼一份腳本，或用 vidpipe plan。'}
+        </p>
+      </section>
+    )
+  }
+  return (
+    <>
+      {plan.without_clip.length > 0 && (
+        <div className="banner bad" role="alert">
+          <div>
+            <strong>{plan.without_clip.length} 個場景沒挑到素材：{plan.without_clip.join('、')}</strong>
+            <p>這樣做不出成片。改一下那幾段的關鍵字（英文效果最好），刪掉這支片再貼一次。</p>
+          </div>
+        </div>
+      )}
+      {plan.warnings.length > 0 && (
+        <div className="banner warn" role="status">
+          <div>
+            <strong>{plan.warnings.length} 則提醒，做成片之前看一下</strong>
+            {plan.warnings.map((w) => <p key={w}>{w}</p>)}
+          </div>
+        </div>
+      )}
+      <p className="muted small note-line">
+        旁白粗估 {durationText(plan.estimated_seconds)}（實際以合成後為準）。
+        確認沒問題就按右上角的「做成片」。
+      </p>
+      {plan.scenes.map((scene, i) => (
+        <section key={scene.id} className="card scene" aria-label={`場景 ${i + 1} 的素材`}>
+          <header className="scene-head">
+            <span className="scene-no">{i + 1}</span>
+            <code>{scene.id}</code>
+            <span className="muted small">約 {scene.estimated_seconds.toFixed(1)} 秒</span>
+            {(scene.query ?? []).map((q) => <Pill key={q}>{q}</Pill>)}
+          </header>
+          <PickBody pick={scene} none="沒有可用的素材" />
+          {scene.skipped_license ? (
+            <p className="muted small">另有 {scene.skipped_license} 支候選因為授權不明沒有列入。</p>
+          ) : null}
+        </section>
+      ))}
+      {plan.music && (
+        <section className="card scene" aria-label="背景音樂">
+          <header className="scene-head">
+            <span className="scene-no">♪</span>
+            <strong>背景音樂</strong>
+            {plan.music.query.map((q) => <Pill key={q}>{q}</Pill>)}
+          </header>
+          <PickBody pick={plan.music} none="沒有可用的背景音樂，成片不會有音樂" />
+        </section>
+      )}
+    </>
+  )
+}
+
 /* ---------------------------------------------------------- 詳細頁 */
 
 const TABS = [
   { id: 'scenes', label: '場景' },
+  { id: 'plan', label: '挑素材' },
   { id: 'credits', label: '素材與授權' },
   { id: 'files', label: '檔案' },
   { id: 'manifest', label: 'Manifest' },
@@ -489,18 +604,23 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id']
 
-function tabOf(raw: string): TabId {
-  return TABS.find((t) => t.id === raw)?.id ?? 'scenes'
+/** 網址沒指定分頁時：還沒旁白的片先看挑素材的結果，其餘看場景。 */
+function tabOf(raw: string, short: ShortDetail | undefined): TabId {
+  const named = TABS.find((t) => t.id === raw)?.id
+  if (named) return named
+  return short && (short.stage === 'planned' || short.manifest_source === 'draft') ? 'plan' : 'scenes'
 }
 
-function Placeholder({ stage }: { stage: ShortSummary['stage'] }) {
+function Placeholder({ stage, running }: { stage: ShortSummary['stage']; running: boolean }) {
+  const text = {
+    new: '還沒有旁白，也沒有成片。',
+    planned: '素材挑好了，還沒有旁白與成片。',
+    narrated: '旁白好了，還沒渲染。',
+    rendered: '',
+  }[stage]
   return (
     <div className="player placeholder">
-      <p>
-        {stage === 'narrated' ? '旁白好了，還沒渲染。' : '還沒有旁白與成片。'}
-        <br />
-        <code>vidpipe make</code> 一次做完。
-      </p>
+      <p>{text}<br />{running ? '做完之後成片會出現在這裡。' : '按右上角的「做成片」。'}</p>
     </div>
   )
 }
@@ -512,6 +632,9 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
   const job = short?.last_job ?? null
   const running = job?.status === 'running'
   useEffect(() => setRefresh(running ? 2000 : 0), [running])
+  const action = useAction()
+  const [confirming, setConfirming] = useState(false)
+  const { reload } = detail
 
   const video = useRef<HTMLVideoElement>(null)
   const [active, setActive] = useState<number | null>(null)
@@ -528,8 +651,33 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
     void v.play().catch(() => undefined)
   }
 
-  const current = tabOf(tab)
+  const current = tabOf(tab, short)
   const mp4 = short ? fileOf(short.files, `${short.id}.mp4`) : undefined
+  const canMake = !!short && !!short.manifest && short.manifest_source !== 'draft' && !running
+  const canReplan = !!short && short.manifest_source === 'draft' && !!short.manifest && !running
+  const failed = job?.status === 'failed'
+  const makeLabel = failed ? '重跑' : short?.stage === 'rendered' ? '重新做一次' : '做成片'
+
+  // 旁白、素材、已渲染的場景都在快取裡，所以「重跑」只會補做缺的那些
+  const make = () => {
+    if (!short?.manifest) return
+    void action.run(() => postJson(`/api/make`, { manifest: short.manifest })).then((r) => {
+      if (r) reload()
+    })
+  }
+  const replan = () => {
+    if (!short?.manifest) return
+    void action.run(() => postJson(`/api/plan`, { manifest: short.manifest })).then((r) => {
+      if (r) reload()
+    })
+  }
+  const remove = () => {
+    if (!short) return
+    void action.run(() => deleteJson(`/api/short/${encodeURIComponent(short.id)}`)).then((r) => {
+      if (r) window.location.hash = '#/shorts'
+      else setConfirming(false)
+    })
+  }
   const cover = short ? fileOf(short.files, `${short.id}.cover.jpg`) : undefined
   const sentenceCount = sentences.length
 
@@ -548,14 +696,43 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
                 <CreditsPills credits={short.credits} />
               </div>
             </div>
-            {mp4 && (
-              <div className="head-actions">
-                <a className="button" href={mp4.url} download={mp4.name}>下載成片</a>
-              </div>
-            )}
+            <div className="head-actions">
+              {canMake && (
+                <button type="button" className={short.stage === 'rendered' && !failed ? undefined : 'primary'}
+                        onClick={make} disabled={action.busy}>
+                  {makeLabel}
+                </button>
+              )}
+              {canReplan && (
+                <button type="button" className="primary" onClick={replan} disabled={action.busy}>
+                  重試挑素材
+                </button>
+              )}
+              {mp4 && <a className="button" href={mp4.url} download={mp4.name}>下載成片</a>}
+              <button type="button" className="danger" onClick={() => setConfirming(true)}
+                      disabled={running || action.busy}>
+                刪除
+              </button>
+            </div>
           </header>
 
-          {running && job && <RunningJob job={job} />}
+          {action.error && <ErrorBanner error={action.error} />}
+          {confirming && (
+            <div className="banner warn" role="alert">
+              <div>
+                <strong>確定要刪除「{short.title || short.id}」？</strong>
+                <p>
+                  會刪掉 work 裡這支片的中間檔，以及 out 裡的成片、封面、credits 和字幕。
+                  旁白快取是各片共用的，不會動；刪掉就回不來。
+                </p>
+              </div>
+              <button type="button" className="danger" onClick={remove} disabled={action.busy}>
+                {action.busy ? '刪除中…' : '確定刪除'}
+              </button>
+              <button type="button" onClick={() => setConfirming(false)} disabled={action.busy}>不要</button>
+            </div>
+          )}
+          {running && job && <RunningJob job={job} onChanged={reload} />}
           {job?.status === 'failed' && <LastFailure key={job.id} job={job} />}
 
           <div className="short-layout">
@@ -566,7 +743,7 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
                          preload="metadata" poster={cover?.url} src={mp4.url}
                          aria-label="成片預覽" onTimeUpdate={onTime} onSeeked={onTime} />
                 )
-                : <Placeholder stage={short.stage} />}
+                : <Placeholder stage={short.stage} running={running} />}
               <dl className="meta">
                 <div><dt>長度</dt><dd>{durationText(short.total)}</dd></div>
                 <div><dt>場景</dt><dd>{short.scenes}</dd></div>
@@ -580,7 +757,8 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
 
             <div className="short-body">
               <nav className="tabs" aria-label="作品內容">
-                {TABS.map((t) => (
+                {TABS.filter((t) => t.id !== 'plan' || short.plan || short.manifest_source === 'draft'
+                  || job?.kind === 'plan').map((t) => (
                   <a key={t.id} href={`#/shorts/${encodeURIComponent(short.id)}/${t.id}`}
                      aria-current={current === t.id ? 'page' : undefined}>
                     {t.label}
@@ -588,6 +766,7 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
                 ))}
               </nav>
               {current === 'scenes' && <ScenesPanel short={short} active={active} onSeek={mp4 ? seek : undefined} />}
+              {current === 'plan' && <PlanPanel plan={short.plan} planning={running && job?.kind === 'plan'} retry={canReplan} />}
               {current === 'credits' && <CreditsPanel short={short} />}
               {current === 'files' && <FilesPanel files={short.files} />}
               {current === 'manifest' && <ManifestPanel manifest={short.manifest} />}

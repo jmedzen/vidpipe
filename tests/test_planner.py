@@ -384,6 +384,71 @@ def test_http_plan_runs_as_a_job_and_the_planned_manifest_is_in_its_result(env, 
         run.httpd.server_close()
 
 
+SCRIPT = ("台北的夜晚，從一碗熱湯開始。\n關鍵字：night market soup, steaming bowl\n\n"
+          "夜市的燈，一盞一盞亮起來。\n關鍵字：city lights")
+
+
+def test_http_plan_takes_a_plain_text_script_and_the_short_shows_up_as_planned(env, vg):
+    """網頁「貼腳本」用的本體：`script` 加 `id`、`title`、`music`、`allow_unknown_license`。"""
+    from test_server import Running
+
+    run = Running(server.make_server("127.0.0.1", 0))
+    try:
+        for body, message in [
+            ({"script": SCRIPT}, "缺少 id"),
+            ({"script": SCRIPT, "id": "Bad Id"}, "不是合法的作品 id"),
+            ({"id": "t2", "script": ""}, "缺少 script"),
+            ({"id": "t2", "script": 5}, "script 要是字串"),
+            ({"id": "t2", "script": " \n "}, "腳本是空的"),
+            ({"id": "t2", "script": SCRIPT, "allow_unknown_license": "yes"},
+             "allow_unknown_license 要是 true 或 false"),
+        ]:
+            resp = run.post("/api/plan", json=body)
+            assert resp.status_code == 400 and message in resp.json()["error"]["message"], body
+        assert vg.searches == []
+        assert run.get("/api/shorts").json()["shorts"] == []        # 壞請求不留下資料夾
+
+        resp = run.post("/api/plan", json={"script": SCRIPT, "id": "t2", "title": "夜市",
+                                           "music": "calm piano", "allow_unknown_license": True})
+        assert resp.status_code == 202 and resp.json()["short_id"] == "t2"
+        job_id = resp.json()["job"]
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            job = run.get(f"/api/job/{job_id}").json()["job"]
+            if job["status"] != "running":
+                break
+            time.sleep(0.2)
+        assert job["status"] == "succeeded", job
+
+        short = run.get("/api/short/t2").json()["short"]
+        assert (short["stage"], short["title"], short["scenes"]) == ("planned", "夜市", 2)
+        assert short["manifest_source"] == "plan" and short["manifest"] == job["result"]["manifest"]
+        assert short["plan"]["scenes"][0]["chosen"]["asset_id"] == "pixabay:11"
+        assert short["plan"]["music"]["chosen"]["asset_id"] == "openverse:2"   # 授權優先
+        assert [s["platform"] for s in vg.searches].count("music") == 1
+        listed = run.get("/api/shorts").json()["shorts"]
+        assert [(s["id"], s["stage"], s["title"]) for s in listed] == [("t2", "planned", "夜市")]
+        draft = json.loads((env / "work" / "shorts" / "t2" / "plan-request.json")
+                           .read_text(encoding="utf-8"))
+        assert draft["search"] == {"allow_unknown_license": True}
+        assert draft["music"] == {"query": "calm piano"}
+    finally:
+        run.httpd.shutdown()
+        run.httpd.server_close()
+
+
+def test_apply_options_layers_flags_on_a_draft_and_leaves_a_non_object_for_the_validator():
+    doc = {"id": "a", "search": {"platform": "stock"}, "music": {"volume": 0.2}}
+    out = planner.apply_options(doc, music="calm piano", allow_unknown_license=True,
+                                orientation="portrait")
+    assert out["search"] == {"platform": "stock", "orientation": "portrait",
+                             "allow_unknown_license": True}
+    assert out["music"] == {"volume": 0.2, "query": "calm piano"}
+    assert doc == {"id": "a", "search": {"platform": "stock"}, "music": {"volume": 0.2}}
+    assert planner.apply_options(doc) == doc
+    assert planner.apply_options([1], music="x") == [1]
+
+
 def test_mcp_plan_short_returns_the_manifest_and_report_and_is_listed(env, vg):
     assert "plan_short" in mcp.HANDLERS and "plan_short" in mcp.INSTRUCTIONS
     reply = mcp.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {

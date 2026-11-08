@@ -26,6 +26,10 @@ class Running:
         kw.setdefault("allow_redirects", False)
         return requests.post(self.base + path, timeout=10, **kw)
 
+    def delete(self, path, **kw):
+        kw.setdefault("allow_redirects", False)
+        return requests.delete(self.base + path, timeout=10, **kw)
+
     def raw_get(self, path, host=None):
         """不經過 requests 的路徑正規化，才測得到 `..`。"""
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)

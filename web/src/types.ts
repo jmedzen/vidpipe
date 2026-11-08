@@ -99,7 +99,10 @@ export interface JobDetail {
 
 /* ---------------------------------------------------------- 作品 */
 
-export type ShortStage = 'new' | 'narrated' | 'rendered'
+export type ShortStage = 'new' | 'planned' | 'narrated' | 'rendered'
+
+/** 現在算數的 manifest 從哪來：送去做的、plan 挑好的、還沒挑的草稿。 */
+export type ManifestSource = 'manifest' | 'plan' | 'draft'
 
 export interface ShortFile {
   area: 'out' | 'work'
@@ -205,8 +208,49 @@ export interface ManifestScene {
   [key: string]: unknown
 }
 
+export interface PlanCandidate {
+  asset_id: string
+  title: string
+  author: string
+  license: { kind: string; label: string }
+  duration: number | null
+  width: number | null
+  height: number | null
+  orientation: 'portrait' | 'landscape' | 'square' | 'unknown'
+  webpage_url: string
+  credit_hint: string
+  /** 為什麼挑它（授權、方向、長度）。只有被選中的那個有。 */
+  why?: string
+}
+
+export interface PlanPick {
+  query?: string[]
+  chosen?: PlanCandidate
+  alternatives?: PlanCandidate[]
+  warnings?: string[]
+  skipped_license?: number
+}
+
+export interface PlanScene extends PlanPick {
+  id: string
+  estimated_seconds: number
+  /** 這個場景原本就指定了素材，plan 沒動它。 */
+  clip?: 'given'
+}
+
+export interface PlanReport {
+  short_id: string
+  estimated_seconds: number
+  scenes: PlanScene[]
+  music: (PlanPick & { query: string[] }) | null
+  without_clip: string[]
+  warnings: string[]
+}
+
 export interface ShortDetail extends ShortSummary {
   manifest: { id: string; title?: string; scenes: ManifestScene[]; [key: string]: unknown } | null
+  manifest_source: ManifestSource | null
+  plan: PlanReport | null
   timeline: ShortTimeline | null
   sources: ShortSources | null
   jobs: JobBrief[]

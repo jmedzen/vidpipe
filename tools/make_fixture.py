@@ -8,6 +8,11 @@
     VIDPIPE_WORK_DIR=/tmp/vp-fixture/work VIDPIPE_OUT_DIR=/tmp/vp-fixture/out vidpipe serve
 
 造出四支片：做完的、做完但有一個素材授權要確認的、只有旁白的、渲染失敗的。需要 ffmpeg。
+
+加 `--serve` 會在造完之後讓假 TTS 與假 vidgrab 繼續開著，並直接開網頁伺服器：網頁上「新增作品」→
+挑素材 → 做成片 → 刪除，整條路都能點，不需要任何真的服務。
+
+    python tools/make_fixture.py /tmp/vp-fixture --serve          # http://127.0.0.1:8320
 """
 
 from __future__ import annotations
@@ -47,9 +52,29 @@ def run(*argv: str, expect: int = 0) -> dict:
     return out
 
 
+def serve(port: int, root: Path) -> int:
+    """網頁伺服器與假服務在同一個行程裡跑；網頁送出的工作是子行程，連的是同一組假服務。"""
+    from vidpipe import server
+
+    os.environ["PYTHONPATH"] = str(ROOT / "src")        # 子行程（python -m vidpipe）要找得到它
+    httpd = server.make_server("127.0.0.1", port)
+    print(json.dumps({"ok": True, "url": f"http://127.0.0.1:{httpd.server_address[1]}",
+                      "work_dir": str(root / "work"), "out_dir": str(root / "out"),
+                      "note": "Ctrl-C 結束"}, ensure_ascii=False), flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("dir", help="要造在哪（會先清掉裡面的 work 與 out）")
+    parser.add_argument("--serve", nargs="?", const=8320, type=int, metavar="PORT",
+                        help="造完之後開網頁伺服器（預設 8320），假服務不關")
+    parser.add_argument("--tts-delay", type=float, default=0.0, metavar="SEC",
+                        help="搭配 --serve：每句旁白多等幾秒，才看得到進行中的進度條與取消")
     args = parser.parse_args()
     if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
         raise SystemExit("需要 ffmpeg 與 ffprobe")
@@ -59,7 +84,7 @@ def main() -> int:
     (root / "src").mkdir(parents=True)
 
     tts, vg_server = FakeServer(), FakeServer()
-    FakeTTS(tts, speech=lambda text: 0.2 * len(text))
+    fake_tts = FakeTTS(tts, speech=lambda text: 0.2 * len(text))
     footage = make(root / "src" / "footage.mp4", "color=c=teal:s=540x960", audio=True,
                    seconds=10, fps=25).read_bytes()
     song = tones(root / "src" / "song.wav", [(220.0, 40.0)], amp=0.25).read_bytes()
@@ -129,6 +154,9 @@ def main() -> int:
     run("narrate", str(path))
     run("render", str(path), expect=1)
 
+    if args.serve:
+        fake_tts.delay = args.tts_delay       # 造片時不延遲，只讓之後從網頁送的工作變慢
+        return serve(args.serve, root)
     tts.close()
     vg_server.close()
     print(json.dumps({"ok": True, "work_dir": str(root / "work"), "out_dir": str(root / "out"),
