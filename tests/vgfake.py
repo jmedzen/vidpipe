@@ -22,6 +22,7 @@ class FakeVidgrab:
         self.search_handler = lambda body: []        # 搜尋請求 → 候選清單（dict）
         self._found: dict[str, list[dict]] = {}      # 搜尋工作 id → 候選
         self.search_error = ""                       # 非空就讓搜尋工作失敗
+        self.file_bytes = lambda path: self.video    # /file/ 的內容；可以依路徑回不同檔案
         server.handler = self.handle
 
     # -- 素材庫 -------------------------------------------------------
@@ -103,5 +104,5 @@ class FakeVidgrab:
             return 200, self.jobs.pop(0)
         if path.startswith("/file/"):
             self.downloads.append(urllib.parse.unquote(path))
-            return 200, self.video
+            return 200, self.file_bytes(urllib.parse.unquote(path))
         return 404, {"error": "no route"}

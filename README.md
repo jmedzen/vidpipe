@@ -5,7 +5,8 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 素材：[vidgrab](https://github.com/jmedzen/vidgrab)（B 站／YouTube／Pexels／Pixabay，帶授權資訊）
 - 旁白：audio.cpp 本機 TTS（任何 OpenAI 風格的 `/v1/audio/speech` 都行，例如 ttsgrab）
 - 渲染：ffmpeg（9:16 重構圖、統一編碼、字幕、混音）
-- 給 AI agent 用：CLI（stdout 只有 JSON）、HTTP API、MCP（stdio 與 HTTP 兩種）
+- 給 AI agent 用：CLI（stdout 只有 JSON）、HTTP API、MCP（stdio 與 HTTP 兩種）；
+  完整做法見 [docs/agent-recipe.md](docs/agent-recipe.md)
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
 > 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`plan`（交給 vidpipe 挑素材）、`cover`、`credits`；HTTP API 也能送件與取成品；`mcp` 讓 Claude Code 之類的 client 直接用。
@@ -192,7 +193,8 @@ vidpipe plan script.txt --id taipei-night-01  # 純文字腳本：空白行隔�
   `music_platform`（`music`＝Openverse＋Jamendo）、`timeout`（每次搜尋最多等幾秒）。CLI 的
   `--platform`、`--orientation`、`--allow-unknown-license` 會蓋過草稿裡的設定。
 - **輸出**：`manifest`（完整、合法）與 `report`——每個場景挑了誰、為什麼（授權、方向、長度）、前 3 個備選、
-  警告；`searches`（搜了什麼、vidgrab 專案名）；`without_clip`（沒挑到素材的場景）。**不滿意就改
+  警告、`skipped_license`（因授權不明沒列入的候選數，只是資訊，不是警告）；`searches`（搜了什麼、
+  vidgrab 專案名）；`without_clip`（沒挑到素材的場景）。**不滿意就改
   manifest 的 `asset_id`**（備選的 `asset_id` 直接貼上去），或調 `query` 再 `plan` 一次。
 - 結果同時存成 `work/shorts/<id>/plan.json`；`plan` 是一個工作（階段 `search`、`music`），網頁看得到，
   HTTP 與 MCP 也一樣（`POST /api/plan`、`plan_short`）。同一支片同時只能有一個工作。
