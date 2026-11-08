@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、HTTP API、MCP（stdio 與 HTTP 兩種）
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`cover`、`credits`；HTTP API 也能送件與取成品；`mcp` 讓 Claude Code 之類的 client 直接用。
+> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`plan`（交給 vidpipe 挑素材）、`cover`、`credits`；HTTP API 也能送件與取成品；`mcp` 讓 Claude Code 之類的 client 直接用。
 
 ## 快速開始
 
@@ -155,6 +155,48 @@ vidpipe narrate shorts.json    # 逐句合成旁白 → 排時間軸 → 寫 wor
 - 字體用設定的 `subtitle_font`。**字體裝不到時 libass 會換成別的字體，中文可能變方塊**——Docker 映像已裝 Noto CJK；
   Mac 請把 `VIDPIPE_SUBTITLE_FONT` 設成裝得到的繁中字體（例如 `PingFang TC`）。
 
+## plan：交給 vidpipe 挑素材
+
+腳本寫好、還沒挑素材時用。**草稿就是 manifest**，只是場景可以用 `query`（搜尋關鍵字）代替 `clip`，
+`music` 也可以給 `query`；`plan` 去 vidgrab 搜、挑好，回一份可以直接 `make` 的 manifest。
+只搜尋，不呼叫 TTS、不下載（下載發生在 `render`）。
+
+```bash
+cat > draft.json <<'EOF'
+{"id": "taipei-night-01", "title": "台北夜市",
+ "scenes": [
+   {"text": "台北的夜晚，從一碗熱湯開始。", "query": "night market soup"},
+   {"text": "夜市很熱鬧。", "query": ["street food", "crowd night"]},
+   {"id": "end", "min_duration": 2.0, "query": "city lights"}],
+ "music": {"query": "calm piano", "volume": 0.3},
+ "search": {"platform": "stock", "orientation": "portrait"}}
+EOF
+vidpipe plan draft.json -o shorts.json        # → shorts.json 可以 validate、make
+vidpipe plan script.txt --id taipei-night-01  # 純文字腳本：空白行隔開場景，「關鍵字：a, b」那行是 query
+```
+
+- **`query` 用英文**：Pexels／Pixabay 的索引對中文很薄。沒給 `query` 的場景會拿旁白文字去搜，並在
+  `warnings` 提醒。給了 `clip` 的場景不動（`clip` 與 `query` 同時給會報錯）。
+- **選片規則**（每個場景獨立挑，依序比較）：
+  1. **授權**：只考慮 `free`（可自由使用）與 `free-attribution`（可用需標註），前者優先；
+     `check`／`unknown` 預設不選，`allow_unknown_license` 才放行（而且會留警告）。
+  2. **長度夠不夠**：素材比場景預估長度（旁白字數粗估，或 `min_duration`）加 0.5 秒還短的往後排——選了會循環補長。
+     注意授權比長度重要：授權較好但太短的，仍勝過授權較差但夠長的（會警告它會循環）。
+  3. **方向**：想要的方向（預設直式）優先，其次方形、尺寸不明，橫式最後。
+  4. **解析度**：短邊低於 `min_height`（720）的往後排。
+  5. 都一樣就照 vidgrab 的相關性順序。
+
+  同一支素材不會用在兩個場景，除非候選只剩它。音樂的規則類似（授權 → 夠長 → 都不夠長就選最長的）。
+- **`search`**（選填）：`platform`（`stock`＝Pexels＋Pixabay、`pexels`、`pixabay`、`bilibili`、
+  `youtube`、`both`）、`orientation`、`per_keyword`（8）、`min_height`（720）、`allow_unknown_license`、
+  `music_platform`（`music`＝Openverse＋Jamendo）、`timeout`（每次搜尋最多等幾秒）。CLI 的
+  `--platform`、`--orientation`、`--allow-unknown-license` 會蓋過草稿裡的設定。
+- **輸出**：`manifest`（完整、合法）與 `report`——每個場景挑了誰、為什麼（授權、方向、長度）、前 3 個備選、
+  警告；`searches`（搜了什麼、vidgrab 專案名）；`without_clip`（沒挑到素材的場景）。**不滿意就改
+  manifest 的 `asset_id`**（備選的 `asset_id` 直接貼上去），或調 `query` 再 `plan` 一次。
+- 結果同時存成 `work/shorts/<id>/plan.json`；`plan` 是一個工作（階段 `search`、`music`），網頁看得到，
+  HTTP 與 MCP 也一樣（`POST /api/plan`、`plan_short`）。同一支片同時只能有一個工作。
+
 ## render：照 manifest 渲染成片
 
 ```bash
@@ -284,7 +326,7 @@ API（皆為 JSON，錯誤格式同 CLI）：
 | GET | `/api/job/{id}[/events]?after=N` | 單一工作與事件（`after` 之後的） |
 | POST | `/api/job/{id}/cancel` | 取消還在跑的工作 |
 | POST | `/api/validate` | 檢查 manifest（本體 `{"manifest": {…}}`）；等同 `vidpipe validate` |
-| POST | `/api/make`／`narrate`／`render`／`cover`／`credits` | 送出工作（本體 `{"manifest": {…}}`，`cover` 另可帶 `at`、`text`）；回 **202** 與 `job` |
+| POST | `/api/make`／`narrate`／`render`／`cover`／`credits`／`plan` | 送出工作（本體 `{"manifest": {…}}`，`cover` 另可帶 `at`、`text`，`plan` 的 `manifest` 是[草稿](#plan交給-vidpipe-挑素材)）；回 **202** 與 `job` |
 | GET | `/api/shorts` | 所有作品：階段（`new`／`narrated`／`rendered`）、長度、檔案、最近一個工作 |
 | GET | `/api/short/{id}` | 單一作品：manifest、時間軸摘要、素材出處、檔案、最近的工作 |
 | GET | `/file/{id}/{out\|work}/{檔名}` | 成品（`out`：mp4、封面、credits、srt）與中間檔（`work`）；支援 `Range` |
@@ -326,6 +368,7 @@ claude mcp add --transport http vidpipe http://localhost:8320/mcp \
 |---|---|
 | `manifest_guide` | manifest 的寫法、欄位與範例（第一次做片先看） |
 | `validate_manifest` | 檢查 manifest（不呼叫 TTS、不碰素材）：分句、字數、粗估長度；寫錯回欄位路徑 |
+| `plan_short` | 草稿（場景給 `query`）→ 搜尋並挑素材與音樂 → 可以直接 `make_short` 的 manifest 與選片報告 |
 | `make_short` | 一次做完：旁白 → 時間軸 → 渲染 → 封面 → credits。回 job 與成品 `url` |
 | `run_step` | 只做一步：`narrate`／`render`／`cover`（可帶 `at`、`text`）／`credits` |
 | `get_job`／`cancel_job` | 查工作（可帶 `wait` 等它做完）／取消 |

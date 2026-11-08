@@ -23,13 +23,13 @@ from pathlib import Path
 from typing import Any
 
 from . import config as config_mod
-from . import jobs, render, timeline
+from . import jobs, planner, render, timeline
 from . import manifest as manifest_mod
 from .config import Config
 from .errors import BadInput, NotFound, VidpipeError
 from .manifest import ID_RE, Manifest
 
-OPS = ("make", "narrate", "render", "cover", "credits")   # 會建立工作的操作
+OPS = ("make", "narrate", "render", "cover", "credits", "plan")   # 會建立工作的操作
 START_WAIT = 10.0       # 送出工作後，最多等多久讓子行程把工作紀錄建起來
 
 # 一般檔案的 Content-Type；沒列的一律不提供
@@ -39,7 +39,7 @@ FILE_TYPES = {
     ".json": "application/json; charset=utf-8", ".wav": "audio/wav",
 }
 WORK_FILES = ("manifest.json", "timeline.json", "sources.json", "narration.wav", "subs.srt",
-              "subs.ass")
+              "subs.ass", "plan.json")
 # 成片旁邊的檔案：<id>.mp4、<id>.cover.jpg、<id>.credits.md、<id>.srt
 OUT_SUFFIXES = (".mp4", ".cover.jpg", ".credits.md", ".srt")
 
@@ -227,15 +227,22 @@ def _wait_for_job(cfg: Config, proc: subprocess.Popen[bytes], errfile: Any) -> s
 
 def launch(cfg: Config, op: str, doc: Any, *, at: float | None = None,
            text: str | None = None) -> dict[str, Any]:
-    """驗證 manifest、存進作品資料夾、開子行程跑 `vidpipe <op>`，回 job id（工作在背景跑）。"""
+    """驗證 manifest、存進作品資料夾、開子行程跑 `vidpipe <op>`，回 job id（工作在背景跑）。
+
+    `plan` 收的是草稿（場景可以只有 `query`），驗證規則見 `planner.parse_request`。
+    """
     if op not in OPS:
         raise BadInput(f"不認得的操作：{op}", hint=f"可用：{', '.join(OPS)}")
-    manifest, _ = parse_document(doc, cfg)
+    if op == "plan":
+        short_id = planner.parse_request(doc, cfg).manifest.id
+    else:
+        short_id = parse_document(doc, cfg)[0].id
     for job in jobs.list_jobs(cfg.work_dir, limit=200, status="running"):
-        if job.get("short_id") == manifest.id:
-            raise jobs.Conflict(f"{manifest.id} 已經有工作在跑（{job['kind']}：{job['id']}）",
+        if job.get("short_id") == short_id:
+            raise jobs.Conflict(f"{short_id} 已經有工作在跑（{job['kind']}：{job['id']}）",
                                 hint="等它做完，或 `POST /api/job/<id>/cancel` 取消")
-    path = timeline.store_manifest(cfg, manifest.id, doc)
+    path = (planner.store_request(cfg, short_id, doc) if op == "plan"
+            else timeline.store_manifest(cfg, short_id, doc))
     cmd = [sys.executable, "-m", "vidpipe", op, str(path)]
     if op == "cover":
         if at is not None:
@@ -248,4 +255,4 @@ def launch(cfg: Config, op: str, doc: Any, *, at: float | None = None,
                                 stderr=errfile, env=env, start_new_session=True)
         threading.Thread(target=proc.wait, daemon=True).start()   # 收屍，免得留 zombie
         job_id = _wait_for_job(cfg, proc, errfile)
-    return {"short_id": manifest.id, "op": op, "job": job_id, "status_url": f"/api/job/{job_id}"}
+    return {"short_id": short_id, "op": op, "job": job_id, "status_url": f"/api/job/{job_id}"}

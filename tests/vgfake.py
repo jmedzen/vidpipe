@@ -18,6 +18,10 @@ class FakeVidgrab:
         self.headers: list[dict] = []
         self.on_batch = self._default_batch
         self.jobs: list[dict] = []     # 輪詢用：依序回
+        self.searches: list[dict] = []
+        self.search_handler = lambda body: []        # 搜尋請求 → 候選清單（dict）
+        self._found: dict[str, list[dict]] = {}      # 搜尋工作 id → 候選
+        self.search_error = ""                       # 非空就讓搜尋工作失敗
         server.handler = self.handle
 
     # -- 素材庫 -------------------------------------------------------
@@ -29,6 +33,19 @@ class FakeVidgrab:
                 "credit_hint": "Ann（Pixabay）", "clips": list(clips)}
         self.items[asset_id] = item
         return item
+
+    @staticmethod
+    def candidate(asset_id, *, duration=20.0, width=1080, height=1920, kind="free",
+                  label=None, title=None):
+        """`/api/vault?project=…` 裡一支候選素材（還沒下載任何片段）。"""
+        labels = {"free": "可自由使用", "free-attribution": "可用需標註", "check": "需確認授權",
+                  "unknown": "未知"}
+        return {"id": asset_id, "platform": asset_id.split(":")[0], "title": title or asset_id,
+                "author": "Ann", "author_url": "https://p/ann",
+                "webpage_url": f"https://p/{asset_id}", "duration": duration, "width": width,
+                "height": height, "license": {"kind": kind, "label": label or labels[kind],
+                                              "name": ""},
+                "credit_hint": "Ann（Pixabay）", "clips": []}
 
     @staticmethod
     def clip(asset_id, start, end, *, exists=True, path="", size=0):
@@ -61,6 +78,23 @@ class FakeVidgrab:
                     return 404, {"error": f"找不到：{needle}"}
                 return 200, {"project": "proj", "item": item, "clip": clip}
             return 200, {"project": "proj", "item": item}
+        if path == "/api/search" and method == "POST":
+            req = json.loads(body)
+            self.searches.append(req)
+            job_id = f"search{len(self.searches)}"
+            self._found[job_id] = self.search_handler(req)
+            return 200, {"job": job_id}
+        if path.startswith("/api/job/search"):
+            job_id = path[len("/api/job/"):]
+            if self.search_error:
+                return 200, {"id": job_id, "done": True, "error": self.search_error,
+                             "result": None}
+            return 200, {"id": job_id, "done": True, "error": None,
+                         "result": {"project": f"proj-{job_id}",
+                                    "count": len(self._found[job_id])}}
+        if path.startswith("/api/vault?") and method == "GET":
+            name = urllib.parse.parse_qs(path.split("?", 1)[1])["project"][0]
+            return 200, {"name": name, "items": self._found[name.removeprefix("proj-")]}
         if path == "/api/batch" and method == "POST":
             req = json.loads(body)
             self.batches.append(req)
