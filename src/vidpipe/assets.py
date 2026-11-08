@@ -131,18 +131,22 @@ def _fetch_file(clip: dict[str, Any], cfg: Config, client: VidgrabClient) -> str
 
 # ------------------------------------------------------------------ 解析 manifest 的 clip
 
-def _check_video(path: str, where: str) -> None:
+def _check_media(path: str, where: str, kind: str) -> None:
     info = ffmpeg.probe(path)
-    if not info["has_video"]:
+    if kind == "audio":
+        if not info["has_audio"]:
+            raise BadInput(f"{where}：{Path(path).name} 沒有音訊軌",
+                           hint="music 要指向音樂檔，或有音訊軌的影片檔")
+    elif not info["has_video"]:
         raise BadInput(f"{where}：{Path(path).name} 沒有影像軌", hint="clip 要指向影片檔")
 
 
-def _resolve_path(clip: dict[str, Any], where: str) -> Resolved:
+def _resolve_path(clip: dict[str, Any], where: str, kind: str = "video") -> Resolved:
     path = Path(str(clip["path"])).expanduser()
     if not path.is_file():
         raise NotFound(f"{where}：找不到素材檔 {path}",
                        hint="路徑相對於執行 vidpipe 的目錄；用絕對路徑最穩（Docker 要掛載進去）")
-    _check_video(str(path), where)
+    _check_media(str(path), where, kind)
     return Resolved(str(path), float(clip.get("start", 0.0)),
                     {"kind": "file", "path": str(path.resolve())})
 
@@ -181,7 +185,7 @@ def _grab(client: VidgrabClient, project: str, item: dict[str, Any], asset_id: s
 
 
 def _resolve_asset(clip: dict[str, Any], duration: float, cfg: Config,
-                   client: VidgrabClient, where: str) -> Resolved:
+                   client: VidgrabClient, where: str, kind: str = "video") -> Resolved:
     asset_id = str(clip["asset_id"])
     start = float(clip.get("start", 0.0))
     hit = client.find(asset_id)
@@ -200,7 +204,7 @@ def _resolve_asset(clip: dict[str, Any], duration: float, cfg: Config,
         found, offset = covered if covered else _grab(
             client, hit["project"], item, asset_id, start, duration)
     path = _fetch_file(found, cfg, client)
-    _check_video(path, where)
+    _check_media(path, where, kind)
     return Resolved(path, offset, _credit_from_item(item, found))
 
 
@@ -215,3 +219,15 @@ def resolve(clip: dict[str, Any] | None, duration: float, cfg: Config, *, where:
     if "path" in clip:
         return _resolve_path(clip, where)
     return _resolve_asset(clip, duration, cfg, make(cfg), where)
+
+
+def resolve_audio(music: dict[str, Any], duration: float, cfg: Config, *, where: str = "music",
+                  make: Callable[[Config], VidgrabClient] = make_client) -> Resolved:
+    """manifest 的 `music` → 本機音訊檔；規則跟影片素材一樣（`start` 是音樂的第幾秒）。
+
+    `duration` 是整支片的長度，用來決定向 vidgrab 要多長的一段。音樂庫的素材
+    （Openverse／Jamendo）與「只要聲音」抓下來的 m4a 都走這裡；有音訊軌的影片檔也行。
+    """
+    if "path" in music:
+        return _resolve_path(music, where, "audio")
+    return _resolve_asset(music, duration, cfg, make(cfg), where, "audio")

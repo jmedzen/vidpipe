@@ -3,8 +3,9 @@
     manifest ──┬─ 每個場景：取素材（assets）→ 裁切、補長、重構圖 → 無聲的場景片段（快取）
                └─ timeline.json（每個場景幾幀）、narration.wav、subs.ass
     場景片段 ── 串接（不重編碼）──┬─ 燒字幕（重編碼）或直接複製影像
-    narration.wav ─────────────────┴─ 編成 AAC ──→ out/<id>.mp4
+    narration.wav ＋ 背景音樂 ── 混音、響度標準化（mix.py）─┴─ 編成 AAC ──→ out/<id>.mp4
 
+- 聲音在 `mix.py`：旁白、背景音樂（可壓低在旁白底下）、整支片的響度標準化。
 - **每個場景一個片段**，檔名帶內容雜湊（素材檔、起點、幀數、規格、fit、focus）。重跑時沒動的場景
   直接用快取，只重做改過的；舊版本的片段在渲染結束時清掉。
 - 場景長度是 `timeline.json` 裡的整數幀，所以片段是精確的幀數，串接是 `-c copy`，
@@ -26,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import assets, edit, ffmpeg, jobs, timeline
+from . import assets, edit, ffmpeg, jobs, mix, timeline
 from .assets import Resolved
 from .config import Config
 from .errors import BadInput
@@ -121,23 +122,24 @@ def build_segment(scene: Scene, index: int, frames: int, resolved: Resolved | No
     return Segment(dest, frames, True, False, available)
 
 
-def _mux(listing: Path, narration: Path | None, subs: Path | None, spec: OutputSpec,
+def _mux(listing: Path, audio: mix.AudioPlan, subs: Path | None, spec: OutputSpec,
          total: float, dest: Path, *, timeout: float) -> None:
-    """串接片段（不重編碼）＋旁白 → AAC；要燒字幕就同時重編碼影像。"""
+    """串接片段（不重編碼）＋聲音 → AAC；要燒字幕就同時重編碼影像。"""
     args = ["-f", "concat", "-safe", "0", "-i", str(listing)]
-    if narration is not None:
-        args += ["-i", str(narration)]
-        audio = (f"[1:a]aresample={spec.audio_rate},"
+    if audio.path is not None:
+        args += ["-i", str(audio.path)]
+        lead = audio.filter + "," if audio.filter else ""
+        chain = (f"[1:a]{lead}aresample={spec.audio_rate},"
                  f"aformat=sample_fmts=fltp:channel_layouts=stereo[a]")
     else:
         args += ["-f", "lavfi", "-t", f"{total:.3f}", "-i",
                  f"anullsrc=r={spec.audio_rate}:cl=stereo"]
-        audio = "[1:a]anull[a]"
+        chain = "[1:a]anull[a]"
     if subs is not None:
-        graph = f"[0:v]ass={filter_value(str(subs))}[v];{audio}"
+        graph = f"[0:v]ass={filter_value(str(subs))}[v];{chain}"
         video_map, video_enc = "[v]", video_encode_args(spec)
     else:
-        graph, video_map, video_enc = audio, "0:v", ["-c:v", "copy"]
+        graph, video_map, video_enc = chain, "0:v", ["-c:v", "copy"]
     tmp = dest.with_name(f".{dest.stem}.partial{dest.suffix}")
     try:
         ffmpeg.run([*args, "-filter_complex", graph, "-map", video_map, "-map", "[a]",
@@ -146,6 +148,14 @@ def _mux(listing: Path, narration: Path | None, subs: Path | None, spec: OutputS
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _license_warning(label: str, credit: dict[str, Any]) -> str | None:
+    if credit.get("kind") != "asset" or \
+            (credit.get("license") or {}).get("kind") in SAFE_LICENSES:
+        return None
+    return (f"{label}的素材授權未明確（{credit.get('asset_id')}）：公開前請先確認；"
+            f"{credit.get('credit_hint', '')}").rstrip("：；")
 
 
 def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None, *,
@@ -165,12 +175,17 @@ def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None
     warnings: list[str] = []
 
     # 先把每個場景的素材都備齊：網路的問題在花時間編碼之前就浮現
-    jobs.stage("assets", f"{sum(1 for s in manifest.scenes if s.clip)} 個素材")
+    music_cfg = mix.music_settings(manifest.music)
+    jobs.stage("assets", f"{sum(1 for s in manifest.scenes if s.clip) + bool(music_cfg)} 個素材")
     resolved: list[Resolved | None] = []
     for i, (scene, span) in enumerate(zip(manifest.scenes, tl["scenes"], strict=True)):
         resolved.append(assets.resolve(scene.clip, span["frames"] / spec.fps,
                                        cfg, where=f"scenes[{i}].clip", make=make_client))
         jobs.progress((i + 1) / len(manifest.scenes))
+    music = None
+    if music_cfg is not None:
+        music = assets.resolve_audio(manifest.music or {}, tl["total"], cfg, where="music",
+                                     make=make_client)
 
     jobs.stage("segments", f"{len(manifest.scenes)} 個場景")
     segments: list[Segment] = []
@@ -188,11 +203,9 @@ def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None
                             f"{seg.available:.1f} 秒，不夠 {wanted:.1f} 秒，已循環補長")
         if not scene.mute_source:
             warnings.append(f"場景 {scene.id} 的 mute_source=false 還沒支援，先靜音")
-        credit = res.credit if res else {}
-        if credit.get("kind") == "asset" and \
-                (credit.get("license") or {}).get("kind") not in SAFE_LICENSES:
-            warnings.append(f"場景 {scene.id} 的素材授權未明確（{credit.get('asset_id')}）："
-                            f"公開前請先確認；{credit.get('credit_hint', '')}".rstrip("：；"))
+        warning = _license_warning(f"場景 {scene.id} ", res.credit if res else {})
+        if warning:
+            warnings.append(warning)
 
     # 清掉這支片舊版本的片段（改過的場景會留下舊雜湊的檔案）
     keep = {s.path.name for s in segments}
@@ -203,13 +216,23 @@ def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None
     listing = render_dir / "segments.txt"
     listing.write_text("".join(edit.list_line(str(s.path)) for s in segments), encoding="utf-8")
     narration = root / "narration.wav" if (tl.get("narration") or {}).get("file") else None
+    if manifest.music and music_cfg is None:
+        warnings.append("music.volume 是 0，沒有混入音樂")
+    if music is not None:
+        warning = _license_warning("背景音樂", music.credit)
+        if warning:
+            warnings.append(warning)
+    jobs.stage("audio", "混音、量響度" if music else "量響度")
+    audio = mix.plan(narration, music, music_cfg, tl["total"], spec, cfg, render_dir,
+                     timeout=timeout)
+    warnings.extend(audio.warnings)
     sub_info = tl.get("subtitles")
     burn = bool(sub_info) and manifest.subtitles.burn_in
     dest = Path(out) if out else Path(cfg.out_dir) / f"{manifest.id}.mp4"
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     jobs.stage("mux", "燒字幕、混入旁白" if burn else "混入旁白")
-    _mux(listing, narration, root / sub_info["ass"] if burn else None, spec, tl["total"], dest,
+    _mux(listing, audio, root / sub_info["ass"] if burn else None, spec, tl["total"], dest,
          timeout=timeout)
 
     srt_path = None
@@ -220,14 +243,22 @@ def run(manifest: Manifest, raw: Any, cfg: Config, out: str | Path | None = None
     sources = [{"scene": s.id, "offset": r.offset if r else None, "looped": seg.looped,
                 "source": r.credit if r else None}
                for s, r, seg in zip(manifest.scenes, resolved, segments, strict=True)]
+    music_source = None if music is None else {
+        "offset": music.offset, "looped": bool((audio.info.get("music") or {}).get("looped")),
+        "source": music.credit}
     (root / "sources.json").write_text(json.dumps(
-        {"schema": "vidpipe.sources/1", "short_id": manifest.id, "scenes": sources},
-        ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        {"schema": "vidpipe.sources/1", "short_id": manifest.id, "scenes": sources,
+         "music": music_source}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     info = ffmpeg.probe(dest)
+    audio_info = dict(audio.info)
+    if audio_info.get("loudness") and info["has_audio"]:
+        final = mix.measure(dest, timeout=timeout)
+        audio_info["loudness"] = {**audio_info["loudness"],
+                                  "output": round(final["i"], 1) if final else None}
     return {"short_id": manifest.id, "path": str(dest), "duration": info["duration"],
             "width": info["width"], "height": info["height"], "fps": info["fps"],
-            "size_bytes": dest.stat().st_size, "burned_subtitles": burn,
+            "size_bytes": dest.stat().st_size, "burned_subtitles": burn, "audio": audio_info,
             "srt": str(srt_path) if srt_path else None,
             "scenes": [{"id": s.id, "frames": seg.frames, "looped": seg.looped,
                         "cached": seg.cached,

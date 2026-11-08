@@ -16,6 +16,7 @@ from mediagen import (
     has_cjk_font,
     peak,
     pixel,
+    tones,
 )
 from ttsfake import FakeTTS
 from vgfake import FakeVidgrab
@@ -112,9 +113,11 @@ def test_renders_a_9x16_short_with_exact_frames_right_pictures_and_narration(env
 
     state = jobs.get_job(env.work, out["job"])
     assert state["kind"] == "render" and state["short_id"] == "r1"
-    assert [s["name"] for s in state["stages"]] == ["assets", "segments", "mux"]
+    assert [s["name"] for s in state["stages"]] == ["assets", "segments", "audio", "mux"]
     assert state["status"] == "succeeded"
     assert not list((env.root / "render").rglob(".*partial*"))
+    loud = result["audio"]["loudness"]       # 旁白也標準化到 -14 LUFS，並量成片確認
+    assert loud["target"] == -14.0 and loud["output"] == pytest.approx(-14.0, abs=1.5)
 
 
 def test_output_option_chooses_the_file_and_no_burn_in_gives_an_srt_beside_it(
@@ -228,6 +231,91 @@ def test_a_missing_clip_file_names_the_scene(env, tmp_path):
     assert err["code"] == "not_found" and "scenes[0].clip" in err["message"]
 
 
+# ------------------------------------------------------------------ 背景音樂
+
+MUSIC_HZ = 220.0
+
+
+@pytest.fixture
+def song(tmp_path):
+    return tones(tmp_path / "song.wav", [(MUSIC_HZ, 20.0)], amp=0.25)
+
+
+def music_scenes(clips):
+    return [{"id": "a", "text": "你好呀，晚安。", "clip": {"path": str(clips["red"])}},
+            {"id": "gap", "min_duration": 2.0, "clip": {"path": str(clips["blue"])}},
+            {"id": "b", "text": "再見。", "clip": {"path": str(clips["red"])}}]
+
+
+def test_background_music_is_mixed_ducked_under_the_voice_and_the_result_is_normalized(
+        env, clips, song):
+    env.narrate(manifest(music_scenes(clips), music={"path": str(song), "volume": 0.3}))
+    result = env.render()["output"]
+    tl = env.timeline()
+    video = result["path"]
+    a, gap, _ = tl["scenes"]
+    first = a["sentences"][0]
+
+    in_gap = peak(video, gap["start"] + 0.5, 1.0, band=MUSIC_HZ)
+    under_voice = peak(video, first["start"] + 0.1, first["end"] - first["start"] - 0.2,
+                       band=MUSIC_HZ)
+    assert in_gap > 500                          # 沒有旁白的場景裡聽得到音樂
+    assert in_gap > 2.5 * under_voice            # 旁白出聲時音樂被壓低
+    assert result["audio"]["music"]["ducked"] is True
+    assert result["audio"]["loudness"]["output"] == pytest.approx(-14.0, abs=1.5)
+    assert result["warnings"] == []
+    mixed = env.root / "render" / "mix.wav"
+    assert mixed.is_file()
+
+    sources = json.loads((env.root / "sources.json").read_text(encoding="utf-8"))
+    assert sources["music"]["offset"] == 0 and sources["music"]["looped"] is False
+    assert sources["music"]["source"] == {"kind": "file", "path": str(song.resolve())}
+
+
+def test_music_only_short_with_no_narration_uses_the_music_as_its_sound(env, clips, song):
+    env.narrate(manifest([{"id": "a", "min_duration": 2.0,
+                           "clip": {"path": str(clips["red"])}}],
+                         music={"path": str(song)}))
+    result = env.render()["output"]
+    assert not (env.root / "narration.wav").exists()
+    assert result["audio"]["music"]["ducked"] is False
+    assert peak(result["path"], 0.7, 0.8, band=MUSIC_HZ) > 1000
+    assert result["audio"]["loudness"]["output"] == pytest.approx(-14.0, abs=1.5)
+
+
+def test_target_loudness_and_switching_normalization_off_come_from_the_config(
+        env, clips, song, monkeypatch):
+    data = manifest(music_scenes(clips), music={"path": str(song)})
+    env.narrate(data)
+    monkeypatch.setenv("VIDPIPE_TARGET_LUFS", "-20")
+    result = env.render()["output"]
+    assert result["audio"]["loudness"]["output"] == pytest.approx(-20.0, abs=1.5)
+    monkeypatch.setenv("VIDPIPE_NORMALIZE_AUDIO", "false")
+    result = env.render()["output"]
+    assert result["audio"]["loudness"] is None and result["audio"]["music"] is not None
+
+
+def test_music_volume_zero_is_skipped_and_said_so(env, clips, song):
+    env.narrate(manifest(music_scenes(clips), music={"path": str(song), "volume": 0}))
+    result = env.render()["output"]
+    assert result["audio"]["music"] is None
+    assert result["warnings"] == ["music.volume 是 0，沒有混入音樂"]
+    assert not (env.root / "render" / "mix.wav").exists()
+
+
+def test_a_music_file_without_sound_or_missing_is_refused_with_the_music_path(
+        env, tmp_path):
+    silent = color_clip(tmp_path / "mute.mp4", ["red"], seg=1, fps=FPS, audio=False)
+    env.narrate(manifest([{"id": "a", "min_duration": 1.0}], music={"path": str(silent)}))
+    err = env.render(expect=2)["error"]
+    assert "music" in err["message"] and "音訊軌" in err["message"]
+    data = manifest([{"id": "a", "min_duration": 1.0}],
+                    music={"path": str(tmp_path / "nope.mp3")})
+    env.narrate(data)
+    err = env.render(expect=1)["error"]
+    assert err["code"] == "not_found" and "music" in err["message"]
+
+
 # ------------------------------------------------------------------ vidgrab 素材
 
 @pytest.fixture
@@ -271,6 +359,31 @@ def test_an_asset_with_an_unclear_license_gets_a_warning(env, vg):
     env.narrate(manifest([ASSET_SCENE]))
     warnings = env.render()["output"]["warnings"]
     assert len(warnings) == 1 and "授權" in warnings[0] and "pixabay:1" in warnings[0]
+
+
+def test_music_from_vidgrab_asks_for_the_range_needed_credits_it_and_warns_on_unclear_licence(
+        env, vg, clips, tmp_path):
+    song = tones(tmp_path / "grabbed.m4a", [(MUSIC_HZ, 30.0)], amp=0.25)
+    vg.video = song.read_bytes()                   # /file 回的是這首歌
+    vg.add("openverse:m1", duration=200.0)
+    vg.items["openverse:m1"]["license"] = {"kind": "free-attribution", "label": "CC BY"}
+    env.narrate(manifest(music_scenes(clips), music={"asset_id": "openverse:m1", "start": 12}))
+    result = env.render()["output"]
+    total = env.timeline()["total"]
+    assert len(vg.batches) == 1
+    start, end = vg.batches[0]["ranges"][0]
+    assert start == 12 and end == pytest.approx(12 + total + 0.5, abs=0.01)
+    assert result["warnings"] == [] and result["audio"]["music"]["looped"] is False
+    sources = json.loads((env.root / "sources.json").read_text(encoding="utf-8"))
+    credit = sources["music"]["source"]
+    assert credit["asset_id"] == "openverse:m1" and credit["credit_hint"]
+
+    env.render()
+    assert len(vg.batches) == 1 and len(vg.downloads) == 1     # 第二次沒有重抓、沒有重下載
+
+    vg.items["openverse:m1"]["license"] = {"kind": "unknown"}
+    warnings = env.render()["output"]["warnings"]
+    assert len(warnings) == 1 and "背景音樂" in warnings[0] and "授權" in warnings[0]
 
 
 # ------------------------------------------------------------------ 路徑跳脫

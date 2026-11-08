@@ -18,7 +18,7 @@ agent 寫（或之後由 `plan` 產生）一份 JSON，`narrate`、`render` 都�
         {"id": "s3", "min_duration": 2.0}                  // 沒有旁白的場景要給最短長度
       ],
       "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
-      "music": {"path": "/path/bgm.mp3", "volume": 0.12, "duck_under_voice": true}
+      "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true}
     }
 
 一個 scene 的旁白可以給 `text`（自動分句）或 `sentences`（明確列出每一句，雙語字幕要配對英文時用）。
@@ -220,11 +220,13 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
 
     music = None
     if "music" in top and top["music"] is not None:
-        m = _obj(top["music"], "music", {"path", "asset_id", "volume", "duck_under_voice"})
+        m = _obj(top["music"], "music",
+                 {"path", "asset_id", "start", "volume", "duck_under_voice"})
         if bool("path" in m) == bool("asset_id" in m):
             raise _fail("music", "path 與 asset_id 要二選一")
         music = {k: (_str(v, f"music.{k}") if k in ("path", "asset_id")
-                     else _num(v, "music.volume", hi=2) if k == "volume"
+                     else _num(v, f"music.{k}", hi=2 if k == "volume" else 36000)
+                     if k in ("volume", "start")
                      else _bool(v, "music.duck_under_voice")) for k, v in m.items()}
 
     raw_scenes = top["scenes"]

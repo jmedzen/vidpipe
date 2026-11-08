@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：旁白、時間軸、字幕、素材取得、渲染都能用了（`narrate` → `render` 就得到一支成片）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`；背景音樂、封面與 credits 在後續 PR。
+> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂與響度都能用了（`narrate` → `render` 就得到一支成片）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`；封面與 credits 在後續 PR。
 
 ## 快速開始
 
@@ -44,6 +44,7 @@ vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_
 | `subtitle_langs` | `zh-TW` | `zh-TW` 或 `zh-TW+en`（雙語） |
 | `burn_subtitles` | `true` | 字幕是否燒進影片；關掉只輸出字幕檔 |
 | `subtitle_font` | `Noto Sans CJK TC` | 燒字幕用的字體（系統要裝得到；Docker 映像裡有 Noto CJK，Mac 請改成 `PingFang TC` 之類） |
+| `normalize_audio` / `target_lufs` | `true` / `-14` | 成片的響度標準化（整合響度 LUFS，-30 到 -5）；TTS 常常偏小聲，開著比較保險 |
 | `work_dir` / `out_dir` | `work` / `out` | 中間產物與成品 |
 | `record_jobs` | `true` | 長指令是否在 `work_dir/_jobs` 留下紀錄（網頁看得到）；關掉就不寫 |
 
@@ -93,7 +94,7 @@ agent 寫一份 JSON，`validate`／`narrate`／`render` 都只讀它；同一�
     {"id": "s3", "min_duration": 2.0}
   ],
   "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
-  "music": {"path": "/path/bgm.mp3", "volume": 0.12, "duck_under_voice": true}
+  "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true}
 }
 ```
 
@@ -181,11 +182,30 @@ narration.wav ──────────────┴─ 編成 AAC ──
 - **不會用過期的旁白渲染**：`render` 會檢查 `timeline.json` 是不是從現在這份 manifest（加上音色、字幕設定）算出來的；
   改過就回 `bad_input`（exit 2），提示重跑 `narrate`（沒改的句子走快取，很快）。還沒跑過 `narrate` 則回 `not_found`。
 - **字幕**：`subtitles.burn_in` 為 true 就燒進畫面（重編碼一次）；false 就把 `.srt` 放在 mp4 旁邊（同檔名）。
-- **聲音**：只有旁白；素材原本的聲音一律靜音（`mute_source: false` 目前會警告後仍靜音，環境音混音在後續 PR）。
-  沒有旁白的片會有一軌靜音，方便上傳與串接。
+- **聲音**：旁白、背景音樂（見下一節），整支片標準化到目標響度；素材原本的聲音一律靜音
+  （`mute_source: false` 目前會警告後仍靜音，環境音混音在後續 PR）。沒有旁白也沒有音樂的片會有一軌靜音，方便上傳與串接。
 - **出處**：`work_dir/shorts/<id>/sources.json`（`vidpipe.sources/1`）記下每個場景用了哪個素材、作者、授權與
   `credit_hint`，之後的 credits 用它。vidgrab 的授權分類不是 `free`／`free-attribution` 的素材，`warnings` 會提醒公開前先確認。
-- 是長指令，會留下工作紀錄（`render`，階段 `assets`／`segments`／`mux`，帶 `short_id`）。
+- 是長指令，會留下工作紀錄（`render`，階段 `assets`／`segments`／`audio`／`mux`，帶 `short_id`）。
+
+### 背景音樂與響度
+
+manifest 的 `music` 給 `path`（本機音訊檔，有音訊軌的影片也行）或 `asset_id`（vidgrab 的音樂庫素材或「只要聲音」抓下來的
+m4a；取檔規則跟影片素材一樣，只要 `start` 起算、整支片那麼長的一段）。
+
+| 欄位 | 預設 | 意思 |
+| --- | --- | --- |
+| `start` | `0` | 從音樂的第幾秒開始用（跳過前奏）；音樂不夠長就循環 `start` 之後的部分 |
+| `volume` | `0.3`（`duck_under_voice` 關掉時 `0.1`） | **音樂相對於旁白的響度**（1 = 一樣大聲，0.3 ≈ 小 10 dB）。`0` = 不放音樂 |
+| `duck_under_voice` | `true` | 旁白出聲時音樂再壓低約 10–15 dB，停頓時回升（sidechain 壓縮，跟著旁白實際音量走） |
+
+- `volume` 是換算過的：先分別量旁白與音樂的響度，再算增益，所以不管音樂檔的母帶音量多大，同一個 `volume` 的效果都差不多。
+- 音樂淡入 0.5 秒、結尾淡出 1.5 秒（短片按比例縮短）；比整支片長就切掉，比較短就循環（接縫會有點突兀，`warnings` 會說）。
+- 混好的聲音留在 `work_dir/shorts/<id>/render/mix.wav`，最後再整體量一次整合響度（LUFS），用 loudnorm 的線性模式調到 `target_lufs`
+  （預設 -14）。結果的 `audio.loudness` 有「混音後量到的」`input`、`target` 與成片實測的 `output`。
+- 沒有旁白、只有音樂（純音樂短片）也行：照 `min_duration` 排時間軸，音樂就是整支片的聲音（沒有東西可壓，所以不 ducking）。
+- 音樂的出處與授權跟素材一樣記進 `sources.json` 的 `music`；授權不是 `free`／`free-attribution` 時 `warnings` 會提醒
+  （vidgrab 的音樂庫只收 CC0、公共領域、CC BY，CC BY 要在說明欄標註作者）。
 
 ## 工作紀錄：jobs／job／cancel
 
