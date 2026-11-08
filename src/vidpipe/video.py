@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import ffmpeg
+from . import ffmpeg, jobs
 from .errors import BadInput
 
 FITS = ("crop", "blur_pad", "letterbox")
@@ -137,8 +137,9 @@ def normalize(src: str | Path, dest: str | Path, spec: OutputSpec | None = None,
             *encode_args(spec),
             "-t", f"{info['duration']:.3f}",
             "-movflags", "+faststart", str(tmp)]
+    jobs.stage("encode", f"{Path(src).name} → {spec.width}x{spec.height}")
     try:
-        ffmpeg.run(args, timeout=timeout)
+        ffmpeg.run(args, timeout=timeout, duration=info["duration"])
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)

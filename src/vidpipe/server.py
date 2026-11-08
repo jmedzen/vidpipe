@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config as config_mod
+from . import jobs as jobs_mod
 from .errors import BadInput, VidpipeError, from_exception
 from .version import __version__, build, full_version
 
@@ -46,7 +47,7 @@ LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
 # 結構化錯誤 code ↔ HTTP 狀態（跟 CLI 的 code 同一套）
 ERROR_STATUS = {
     "bad_input": 400, "unauthorized": 401, "forbidden": 403, "not_found": 404,
-    "method_not_allowed": 405, "conflict": 409, "clip_too_short": 400,
+    "method_not_allowed": 405, "conflict": 409, "clip_too_short": 400, "cancelled": 409,
     "upstream_error": 502, "dependency_missing": 503, "timeout": 504,
     "bad_config": 500, "render_failed": 500, "internal": 500,
 }
@@ -245,6 +246,10 @@ class Handler(BaseHTTPRequestHandler):
                             "config": cfg.to_dict(mask=True)})
             elif route == "/api/doctor":
                 self._doctor(query)
+            elif route == "/api/jobs":
+                self._jobs(query)
+            elif route.startswith("/api/job/"):
+                self._job(route[len("/api/job/"):], query)
             elif route.startswith("/api/"):
                 self._error(f"沒有這個端點：{route}", status=404, code="not_found")
             else:
@@ -258,7 +263,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._guard(route, write=True):
                 return
-            if route.startswith("/api/"):
+            parts = route.strip("/").split("/")
+            if (self.command == "POST" and len(parts) == 4 and parts[:2] == ["api", "job"]
+                    and parts[3] == "cancel"):
+                work_dir = config_mod.load().work_dir
+                self._json({"ok": True, "job": jobs_mod.request_cancel(work_dir, parts[2]),
+                            "signalled": True})
+            elif route.startswith("/api/"):
                 self._error(f"沒有這個端點：{route}", status=404, code="not_found")
             else:
                 self._send(404, b"not found", "text/plain; charset=utf-8")
@@ -273,6 +284,31 @@ class Handler(BaseHTTPRequestHandler):
         raw = (urllib.parse.parse_qs(query).get("skip") or [""])[0]
         skip = [x.strip() for x in raw.split(",") if x.strip()]
         self._json(doctor.run(config_mod.load(), skip=skip))
+
+    def _jobs(self, query: str) -> None:
+        params = urllib.parse.parse_qs(query)
+        try:
+            limit = int((params.get("limit") or ["50"])[0])
+        except ValueError:
+            raise BadInput("limit 要是整數") from None
+        status = (params.get("status") or [""])[0] or None
+        work_dir = config_mod.load().work_dir
+        self._json({"ok": True, "jobs": jobs_mod.list_jobs(
+            work_dir, limit=max(1, min(limit, 200)), status=status)})
+
+    def _job(self, rest: str, query: str) -> None:
+        job_id, _, tail = rest.partition("/")
+        work_dir = config_mod.load().work_dir
+        job = jobs_mod.get_job(work_dir, job_id)
+        if tail not in ("", "events"):
+            self._error(f"沒有這個端點：/api/job/{rest}", status=404, code="not_found")
+            return
+        try:
+            after = int((urllib.parse.parse_qs(query).get("after") or ["0"])[0])
+        except ValueError:
+            raise BadInput("after 要是整數") from None
+        self._json({"ok": True, "job": job,
+                    "events": jobs_mod.read_events(work_dir, job_id, after)})
 
     def _shell(self) -> None:
         page = STATIC_DIR / "index.html"

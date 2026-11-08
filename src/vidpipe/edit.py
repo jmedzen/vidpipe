@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import ffmpeg
+from . import ffmpeg, jobs
 from .errors import BadInput
 from .video import OutputSpec, encode_args
 
@@ -72,8 +72,9 @@ def trim(src: str | Path, dest: str | Path, start: float = 0.0, duration: float 
     args = ["-ss", f"{start:.3f}", "-i", str(src), "-t", f"{length:.3f}",
             "-map", "0:v", "-map", "0:a?", *encode_args(spec), "-r", str(spec.fps),
             "-movflags", "+faststart", str(tmp)]
+    jobs.stage("trim", f"{Path(src).name} {start:g}s +{length:g}s")
     try:
-        ffmpeg.run(args, timeout=timeout)
+        ffmpeg.run(args, timeout=timeout, duration=length)
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
@@ -113,7 +114,8 @@ def fill(src: str | Path, dest: str | Path, duration: float, *, start: float = 0
         args = ["-stream_loop", "-1", "-i", str(source), "-t", f"{duration:.3f}",
                 "-map", "0:v", "-map", "0:a?", *encode_args(spec), "-r", str(spec.fps),
                 "-movflags", "+faststart", str(tmp)]
-        ffmpeg.run(args, timeout=timeout)
+        jobs.stage("loop", f"循環補成 {duration:g}s")
+        ffmpeg.run(args, timeout=timeout, duration=duration)
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
@@ -179,7 +181,8 @@ def concat(inputs: Sequence[str | Path], dest: str | Path, *, copy: bool = False
             args += ["-filter_complex", f"{pads}concat=n={len(infos)}:v=1:a=1[v][a]",
                      "-map", "[v]", "-map", "[a]", *encode_args(spec), "-r", str(spec.fps),
                      "-movflags", "+faststart", str(tmp)]
-        ffmpeg.run(args, timeout=timeout)
+        jobs.stage("concat", f"{len(infos)} 支{'（copy）' if copy else ''}")
+        ffmpeg.run(args, timeout=timeout, duration=sum(i["duration"] for i in infos))
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)

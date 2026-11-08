@@ -34,6 +34,7 @@ class Config:
     # 輸出
     work_dir: str = "work"       # 中間產物與快取
     out_dir: str = "out"         # 成品
+    record_jobs: bool = True     # 長指令在 work_dir/_jobs 留下狀態與事件（網頁看得到）
     # 字幕
     subtitle_langs: str = "zh-TW"  # zh-TW 或 zh-TW+en（雙語）
     burn_subtitles: bool = True    # 預設燒進影片；關掉就只輸出字幕檔

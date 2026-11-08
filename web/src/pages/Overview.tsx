@@ -1,8 +1,9 @@
 import { ErrorBanner } from '../components/ErrorBanner'
 import { StatusDot } from '../components/StatusDot'
 import { useApi } from '../lib/api'
+import { JobTable } from './Jobs'
 import { LEVEL_TEXT, clock, levelOf, worst } from '../lib/format'
-import type { Check, ConfigInfo, Doctor, Level } from '../types'
+import type { Check, ConfigInfo, Doctor, JobList, Level } from '../types'
 
 const LABELS: Record<string, string> = {
   ffmpeg: 'ffmpeg',
@@ -78,6 +79,7 @@ function Summary({ level, doctor, bad, warn }: { level: Level; doctor: Doctor; b
 export function Overview() {
   const doctor = useApi<Doctor>('/api/doctor', 30_000)
   const config = useApi<ConfigInfo>('/api/config')
+  const recent = useApi<JobList>('/api/jobs?limit=5', 5000)
 
   const checks = doctor.data?.checks ?? []
   const levels = checks.map(levelOf)
@@ -106,6 +108,16 @@ export function Overview() {
       {doctor.error && <ErrorBanner error={doctor.error} onRetry={doctor.reload} />}
       {!doctor.data && !doctor.error && <p className="muted">第一次檢查中…</p>}
       {doctor.data && <Summary level={worst(levels)} doctor={doctor.data} bad={bad} warn={warn} />}
+
+      {recent.data && recent.data.jobs.length > 0 && (
+        <section className="recent" aria-label="最近的工作">
+          <div className="section-head">
+            <h3>最近的工作</h3>
+            <a href="#/jobs">全部 →</a>
+          </div>
+          <JobTable jobs={recent.data.jobs} compact />
+        </section>
+      )}
 
       {doctor.data && (
         <div className="cards">
