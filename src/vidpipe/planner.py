@@ -243,6 +243,13 @@ def _why(c: dict[str, Any], need: float) -> str:
     return "、".join(parts)
 
 
+def skipped_count(candidates: list[dict[str, Any]], settings: Settings) -> int:
+    """因為授權不明或要確認、沒有列入考慮的候選有幾支（`allow_unknown_license` 時是 0）。"""
+    if settings.allow_unknown_license:
+        return 0
+    return sum(1 for c in candidates if _kind(c) not in OK_LICENSES)
+
+
 def choose(candidates: list[dict[str, Any]], need: float, settings: Settings, used: set[str],
            *, music: bool = False) -> tuple[dict[str, Any] | None, list[dict], list[str]]:
     """從候選挑一支。回 (選中的候選或 None, 備選的簡述, 說明這次選擇的注意事項)。"""
@@ -251,10 +258,6 @@ def choose(candidates: list[dict[str, Any]], need: float, settings: Settings, us
     notes: list[str] = []
     eligible = [(i, c) for i, c in enumerate(candidates) if c.get("id")
                 and (_kind(c) in OK_LICENSES or settings.allow_unknown_license)]
-    skipped = sum(1 for c in candidates if _kind(c) not in OK_LICENSES) \
-        if not settings.allow_unknown_license else 0
-    if skipped:
-        notes.append(f"{skipped} 支授權不明或要確認的候選沒有列入（allow_unknown_license 可放行）")
     fresh = [(i, c) for i, c in eligible if c["id"] not in used]
     if not fresh and eligible and not music:
         notes.append("可用的候選都已經用在別的場景，這個場景重複使用")
@@ -341,10 +344,14 @@ def run(req: Request, cfg: Config, *, client: Any = None) -> dict[str, Any]:
         candidates = _search_once(client, query, settings.platform, settings, cache, searches)
         best, alternatives, notes = choose(candidates, need, settings, used)
         entry["alternatives"] = alternatives
+        entry["skipped_license"] = skipped_count(candidates, settings)
         entry["warnings"] = [*entry.get("warnings", []), *notes]
         warnings.extend(f"{scene.id}：{n}" for n in notes)
         if best is None:
-            msg = "沒有可用的素材（搜不到，或候選的授權都不能用）"
+            msg = ("沒有可用的素材（搜不到" if not entry["skipped_license"] else
+                   f"沒有可用的素材（{entry['skipped_license']} 支候選的授權不明或要確認，"
+                   "沒有列入；allow_unknown_license 可放行")
+            msg += "）"
             entry["warnings"].append(msg)
             warnings.append(f"{scene.id}：{msg}")
         else:

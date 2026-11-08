@@ -204,6 +204,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
                  if v is not None}
     if overrides and isinstance(doc, dict):
         doc = {**doc, "search": {**(doc.get("search") or {}), **overrides}}
+    if args.music and isinstance(doc, dict):
+        doc = {**doc, "music": {**(doc.get("music") or {}), "query": args.music}}
     req = planner.parse_request(doc, cfg)          # 先驗證：寫錯就不開工作
 
     def run() -> dict[str, Any]:
@@ -403,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", help="作品 id（純文字腳本必填）")
     p.add_argument("--title", help="標題（純文字腳本用）")
     p.add_argument("-o", "--out", help="把挑好的 manifest 另存成這個檔案")
+    p.add_argument("--music", help="背景音樂的搜尋關鍵字（會蓋過草稿的 music.query）")
     p.add_argument("--platform", help="stock（預設）、pexels、pixabay、bilibili、youtube、both")
     p.add_argument("--orientation", help="portrait（預設）、landscape、square、any")
     p.add_argument("--allow-unknown-license", action="store_true",

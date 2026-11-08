@@ -41,7 +41,8 @@ def test_license_comes_first_even_when_a_worse_license_is_a_better_fit():
 def test_unclear_licenses_are_left_out_unless_allowed_and_then_flagged():
     cands = [cand("a:1", kind="unknown"), cand("a:2", kind="check")]
     best, rest, notes = pick(cands)
-    assert best is None and rest == [] and "2 支授權不明" in notes[0]
+    assert best is None and rest == [] and notes == []
+    assert planner.skipped_count(cands, S) == 2
     allowed = planner.Settings(allow_unknown_license=True)
     best, rest, notes = pick(cands, settings=allowed)
     assert best == "a:2" and rest == ["a:1"]           # check 比 unknown 好
@@ -208,7 +209,8 @@ def test_plan_searches_once_per_query_picks_for_each_scene_and_builds_a_valid_ma
     assert chosen["asset_id"] == "pixabay:11" and chosen["license"]["kind"] == "free"
     assert "直式" in chosen["why"] and "≥" in chosen["why"]
     assert [a["asset_id"] for a in report["scenes"][0]["alternatives"]] == ["pixabay:10"]
-    assert any("授權不明" in n for n in report["scenes"][0]["warnings"])     # 12 沒列入
+    assert report["scenes"][0]["skipped_license"] == 1 and report["scenes"][0][
+        "warnings"] == []                                                    # 12 沒列入，但不是警告
     assert report["scenes"][1]["chosen"]["orientation"] == "landscape"
     assert any("end：" in w and "不是直式" in w for w in report["warnings"])
     assert report["music"]["chosen"]["asset_id"] == "openverse:2"
@@ -244,7 +246,8 @@ def test_nothing_usable_leaves_the_scene_without_a_clip_and_says_so_but_plans_th
     assert all("clip" not in s for s in result["manifest"]["scenes"])
     assert result["report"]["without_clip"] == ["a", "b", "c"]
     warnings = " ".join(result["report"]["warnings"])
-    assert "a：沒有可用的素材" in warnings and "b：沒有可用的素材" in warnings
+    assert "a：沒有可用的素材（搜不到）" in warnings
+    assert "b：沒有可用的素材（1 支候選的授權不明或要確認" in warnings
     assert "c：沒有旁白也沒有 query" in warnings
     # 放行不明授權：b 選到那支，並且留警告
     doc["search"] = {"allow_unknown_license": True}
