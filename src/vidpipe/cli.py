@@ -48,15 +48,18 @@ _RESULT_KEYS = ("path", "duration", "width", "height", "fps", "looped", "size_by
 
 
 def _recorded(kind: str, params: dict[str, Any], run: Callable[[], dict[str, Any]],
-              summary: Callable[[dict[str, Any]], dict[str, Any]] | None = None) -> int:
+              summary: Callable[[dict[str, Any]], dict[str, Any]] | None = None, *,
+              short_id: str | None = None) -> int:
     """跑一個長指令並留下工作紀錄（網頁看得到進度）；輸出多一個 `job`（沒記錄就是 null）。
 
     `summary` 把輸出縮成存進紀錄的「結果」；預設只留檔案資訊那幾個欄位。
+    `short_id` 標明這個工作屬於哪支片（manifest 的 id）。
     """
     from . import jobs
 
     cfg = config_mod.load()
-    with jobs.JobRecorder(cfg.work_dir, kind, args=params, enabled=cfg.record_jobs) as job:
+    with jobs.JobRecorder(cfg.work_dir, kind, args=params, short_id=short_id,
+                          enabled=cfg.record_jobs) as job:
         out = run()
         job.set_result(summary(out) if summary else {k: out[k] for k in _RESULT_KEYS if k in out})
     emit({"ok": True, "job": job.id if job.enabled else None, "output": out})
@@ -114,6 +117,50 @@ def cmd_speak(args: argparse.Namespace) -> int:
     return _recorded("narrate", {"sentences": len(sentences), "max_chars": args.max_chars,
                                  "model": cfg.tts_model or None}, run,
                      summary=lambda o: {k: o[k] for k in ("count", "cached", "total_duration")})
+
+
+def _load_manifest(path: str) -> tuple[Any, Any, Any]:
+    """讀＋驗證 manifest，回傳 (原稿, Manifest, 套用 manifest.voice 後的設定)。"""
+    from . import manifest as manifest_mod
+
+    cfg = config_mod.load()
+    raw = manifest_mod.read_json(path)
+    manifest = manifest_mod.parse(raw, subtitle_langs=cfg.subtitle_langs,
+                                  burn_in=cfg.burn_subtitles)
+    return raw, manifest, manifest_mod.apply_voice(manifest, cfg)
+
+
+# 中文旁白大約每秒 4–5 字；只是排鏡頭長度時的粗估，實際以合成後的秒數為準
+_CHARS_PER_SECOND = 4.5
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """只檢查 manifest（不呼叫 TTS、不碰素材）；回每個場景的分句與粗估長度。"""
+    _, manifest, _ = _load_manifest(args.manifest)
+    scenes = []
+    for scene in manifest.scenes:
+        chars = sum(len(s.text) for s in scene.sentences)
+        speech = chars / _CHARS_PER_SECOND
+        scenes.append({"id": scene.id, "sentences": [s.text for s in scene.sentences],
+                       "chars": chars, "min_duration": scene.min_duration,
+                       "estimated_seconds": round(max(scene.min_duration, speech), 1),
+                       "clip": scene.clip, "fit": scene.fit})
+    emit({"ok": True, "short_id": manifest.id, "scenes": scenes,
+          "estimated_seconds": round(sum(s["estimated_seconds"] for s in scenes), 1),
+          "estimate_note": f"以每秒 {_CHARS_PER_SECOND:g} 字粗估；實際長度以 narrate 的結果為準"})
+    return 0
+
+
+def cmd_narrate(args: argparse.Namespace) -> int:
+    from . import timeline
+
+    raw, manifest, cfg = _load_manifest(args.manifest)
+    return _recorded(
+        "narrate", {"manifest": args.manifest, "scenes": len(manifest.scenes),
+                    "model": cfg.tts_model or None},
+        lambda: timeline.run(manifest, raw, cfg),
+        summary=lambda o: {k: o[k] for k in ("short_id", "total", "warnings")},
+        short_id=manifest.id)
 
 
 def cmd_normalize(args: argparse.Namespace) -> int:
@@ -249,6 +296,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-chars", type=int, default=40)
     p.add_argument("--out-dir", help="另外把每句複製成 001.wav、002.wav… 到這個資料夾")
     p.set_defaults(func=cmd_speak)
+
+    p = sub.add_parser("validate", help="檢查 manifest（不呼叫 TTS），回分句與粗估長度")
+    p.add_argument("manifest", help="manifest JSON 檔")
+    p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("narrate", help="照 manifest 合成旁白並排時間軸（旁白音軌、場景長度）")
+    p.add_argument("manifest", help="manifest JSON 檔")
+    p.set_defaults(func=cmd_narrate)
 
     p = sub.add_parser("jobs", help="工作紀錄清單（新的在前）")
     p.add_argument("--status", help="running／succeeded／failed／cancelled／interrupted")

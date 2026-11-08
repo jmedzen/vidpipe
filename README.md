@@ -8,7 +8,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`；旁白時間軸、字幕依序在後續 PR。
+> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`（manifest 與時間軸）；字幕、渲染依序在後續 PR。
 
 ## 快速開始
 
@@ -73,9 +73,69 @@ vidpipe speak script.txt --out-dir wavs   # 另外複製成 001.wav、002.wav…
 - 是長指令，會留下工作紀錄（`narrate`），網頁看得到逐句進度。
 - 真實的 audio.cpp 要先載入模型；CosyVoice3 還要 `voice_ref` 與 `reference_text`（`vidpipe doctor` 會檢查）。
 
+## manifest：宣告式描述一支片
+
+agent 寫一份 JSON，`validate`／`narrate`／（之後的）`render` 都只讀它；同一份 manifest 重跑得到同一支片。
+
+```json
+{
+  "schema": "vidpipe.manifest/1",
+  "id": "taipei-night-01",
+  "title": "台北夜市",
+  "output": {"aspect": "9:16", "fps": 30},
+  "voice": {"model": "", "voice_ref": "", "reference_text": ""},
+  "timing": {"lead": 0.15, "gap": 0.25, "tail": 0.45},
+  "scenes": [
+    {"id": "s1", "text": "台北的夜晚，從一碗熱湯開始。",
+     "clip": {"asset_id": "pixabay:123", "start": 3.0}, "fit": "blur_pad", "focus": "0.5,0.5"},
+    {"id": "s2", "sentences": [{"text": "夜市很熱鬧。", "en": "The market is lively."}]},
+    {"id": "s3", "min_duration": 2.0}
+  ],
+  "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
+  "music": {"path": "/path/bgm.mp3", "volume": 0.12, "duck_under_voice": true}
+}
+```
+
+- 只有 `schema`、`id`、`scenes` 必填。`id` 是小寫英數、底線、連字號（最長 64 字），會當資料夾名稱。
+- 旁白給 `text`（自動分句）或 `sentences`（明確列出每一句；雙語字幕要配英文時用），兩個擇一。
+  沒有旁白的場景要給 `min_duration`（秒，最長 120）。
+- `voice` 寫了就蓋過設定檔與環境變數（寫空字串 = 明確要伺服器預設）；`subtitles` 沒寫的欄位用設定檔的 `subtitle_langs`／`burn_subtitles`。
+- **不認得的欄位一律報錯**（多半是打錯字），訊息帶路徑與可用欄位，例如 `manifest scenes[1]：不認得的欄位 txt`。
+- 每個場景的 `clip` 擇一給 `asset_id`（vidgrab 的素材 id）或 `path`（本機檔案）；素材怎麼取得與裁切在渲染階段。
+
+```bash
+vidpipe validate shorts.json   # 只檢查，不呼叫 TTS：每個場景的分句、字數、粗估秒數
+vidpipe narrate shorts.json    # 逐句合成旁白 → 排時間軸 → 寫 work_dir/shorts/<id>/
+```
+
+### narrate 做什麼
+
+每個場景照這個節奏排：
+
+```
+場景開頭 ─ lead ─ 第一句 ─ gap ─ 第二句 ─ … ─ 最後一句 ─ tail ─ 場景結束
+```
+
+- **場景長度** = max(`min_duration`, 旁白結束 + `tail`)，**向上取整到整數幀**，所以每個場景的起點都落在幀邊界上，
+  逐場景渲染再串接不會累積誤差。沒有旁白的場景就是 `min_duration`。
+- **字幕時間**是每一句的絕對起訖秒數，來自實際合成出來的長度。
+- 總長超過 60 秒會在 `warnings` 提醒；超過 3 分鐘就不會被 YouTube 當成 Shorts。
+- 輸出在 `work_dir/shorts/<id>/`（放在 `shorts/` 底下，作品 id 叫 `cache` 也不會蓋到 TTS 快取）：
+
+| 檔案 | 內容 |
+| --- | --- |
+| `manifest.json` | 驗證過的原稿 |
+| `timeline.json` | 每個場景的幀數與起訖、每一句的起訖與英文、用的音色 |
+| `narration.wav` | 每句旁白擺在它的起點、其餘補靜音，長度等於整支片（24kHz 單聲道） |
+
+- `timeline.json` 與 `narration.wav` 對同一份 manifest 是逐位元組相同的（快取命中與否不寫進檔案），
+  檔案裡的句子音檔只寫檔名（在 `work_dir/cache/tts/`），所以換機器、換掛載點也還能用。
+- 整支片都沒有旁白（純音樂）也行：照 `min_duration` 排時間軸，不產生 `narration.wav`。
+- 是長指令，會留下工作紀錄（`narrate`，帶 `short_id`），網頁看得到逐句進度。
+
 ## 工作紀錄：jobs／job／cancel
 
-`normalize`、`trim`、`fill`、`concat`、`speak`（之後的渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
+`normalize`、`trim`、`fill`、`concat`、`speak`、`narrate`（之後的渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
 **不管是從終端機、API 還是 MCP 發起的**，網頁的「工作」頁都看得到。輸出的 JSON 多一個 `job`（記錄關掉時是 `null`）。
 
 ```bash
