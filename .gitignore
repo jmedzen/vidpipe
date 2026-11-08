@@ -12,3 +12,5 @@ vidpipe.json
 # 產出
 work/
 out/
+# 前端
+web/node_modules/

@@ -23,6 +23,15 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 前端型別檢查，以及產物與原始碼同步
+        run: |
+          (cd web && npm ci && npm run typecheck)
+          tools/check_frontend.sh
       - name: Lint
         run: ruff check .
       - name: 測試
@@ -45,3 +54,16 @@ jobs:
           docker run --rm --entrypoint sh vidpipe:ci -c 'ls /usr/share/fonts/opentype/noto/*CJK* | head -1'
           docker run --rm vidpipe:ci version | tee /tmp/v.json
           grep -q "$BUILD" /tmp/v.json
+      - name: serve 在映像裡起得來、前端產物有打包、token 有擋
+        run: |
+          docker run -d --name vp -e VIDPIPE_API_TOKEN=ci-token -p 127.0.0.1:8320:8320 \
+            vidpipe:ci serve --host 0.0.0.0 --allow-lan --no-open
+          for i in $(seq 1 30); do curl -fs localhost:8320/api/version && break; sleep 1; done
+          curl -fs localhost:8320/ | grep -q '<div id="root">'
+          ASSET="$(curl -fs localhost:8320/ | grep -o '/static/assets/[^"]*\.js' | head -1)"
+          test -n "$ASSET" && curl -fs "localhost:8320$ASSET" -o /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8320/api/config)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ci-token' localhost:8320/api/config)" = 200
+          rc=0; docker run --rm vidpipe:ci serve --host 0.0.0.0 --no-open || rc=$?
+          test "$rc" = 2
+          docker rm -f vp

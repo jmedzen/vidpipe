@@ -6,8 +6,9 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 - 旁白：audio.cpp 本機 TTS（任何 OpenAI 風格的 `/v1/audio/speech` 都行，例如 ttsgrab）
 - 渲染：ffmpeg（9:16 重構圖、統一編碼、字幕、混音）
 - 給 AI agent 用：CLI（stdout 只有 JSON）、之後有 HTTP API 與 MCP
+- 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、之後還有進度與成品預覽
 
-> 狀態：階段 1。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`；旁白、字幕依序在後續 PR。
+> 狀態：階段 1 完成，網頁介面起步。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`；旁白、字幕依序在後續 PR。
 
 ## 快速開始
 
@@ -42,6 +43,49 @@ vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_
 | `subtitle_langs` | `zh-TW` | `zh-TW` 或 `zh-TW+en`（雙語） |
 | `burn_subtitles` | `true` | 字幕是否燒進影片；關掉只輸出字幕檔 |
 | `work_dir` / `out_dir` | `work` / `out` | 中間產物與成品 |
+
+## 網頁介面
+
+```bash
+vidpipe serve                      # http://127.0.0.1:8320，會開預設瀏覽器；--no-open 關掉
+vidpipe serve --port 8080
+```
+
+目前有兩頁：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查；失敗時顯示原因與 hint）與
+**設定**（目前生效的設定，token 遮蔽）。作品列表、進度、成品預覽隨後續 PR 加入，規劃見
+`vidpipe-web-ui-plan.md`。
+
+API（皆為 JSON，錯誤格式同 CLI）：`GET /api/version`（公開，給 healthcheck）、`GET /api/doctor?skip=…`、
+`GET /api/config`。
+
+**安全**：這個服務會呼叫 TTS、讀寫 work 目錄，所以預設只綁 `127.0.0.1`。
+
+| 情況 | 行為 |
+|---|---|
+| 綁非本機位址，沒加 `--allow-lan` | 拒絕啟動（exit 2） |
+| 綁非本機位址，沒設 `VIDPIPE_API_TOKEN` | 拒絕啟動；外層已有保護時才用 `--no-auth` |
+| 設了 token | `/api/*` 要 `Authorization: Bearer`；瀏覽器開一次 `/?token=…` 換 HttpOnly、SameSite=Strict cookie。外殼、`/static/*`、`/api/version` 公開 |
+| `Host` 標頭 | 只認本機名稱與 IP 字面值（擋 DNS rebinding）；用網域名稱連要放進 `VIDPIPE_ALLOWED_HOSTS`（逗號分隔） |
+| 寫入類請求 | 帶了 `Origin`／`Referer` 就必須跟 `Host` 同源（擋 CSRF）；curl 這類沒帶的放行 |
+
+Docker 裡必須綁 `0.0.0.0`，所以要 `--allow-lan` 與 token；對外範圍由 `-p` 決定，只想本機用就寫 `127.0.0.1:`：
+
+```bash
+docker run --rm -e VIDPIPE_API_TOKEN="$(openssl rand -hex 24)" -p 127.0.0.1:8320:8320 \
+  -v "$PWD/work:/data/work" -v "$PWD/out:/data/out" vidpipe serve --host 0.0.0.0 --allow-lan --no-open
+```
+
+### 前端
+
+React 19 + TypeScript + Vite，原始碼在 `web/`，**打包產物輸出到 `src/vidpipe/static/` 並進版控**，
+所以 pip 與 Docker 裝完就能用，不需要 node。
+
+```bash
+cd web && npm ci        # 只有第一次
+npm run build           # tsc --noEmit && vite build && 寫入 .build-stamp
+npm run typecheck       # 只做型別檢查
+tools/check_frontend.sh # 產物與原始碼是否同步（CI 會跑）
+```
 
 ## doctor
 
@@ -115,6 +159,7 @@ vidpipe concat a.mp4 b.mp4 c.mp4 -o all.mp4               # 依序串接
 
 ```bash
 ruff check . && pytest -q
+cd web && npm ci && npm run build   # 只有動到前端才需要
 ```
 
 ## 授權

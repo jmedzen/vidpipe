@@ -78,6 +78,17 @@ def cmd_concat(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    from . import server
+
+    try:
+        return server.serve(args.host, args.port, open_browser=not args.no_open,
+                            allow_lan=args.allow_lan, no_auth=args.no_auth)
+    except OSError as exc:  # port 被占用之類
+        raise VidpipeError(f"伺服器起不來：{exc}",
+                           hint="換一個 --port，或確認沒有重複啟動") from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vidpipe",
@@ -125,6 +136,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--copy", action="store_true",
                    help="不重編碼（快、零損失；AAC 接縫可能有幾十毫秒誤差）")
     p.set_defaults(func=cmd_concat)
+
+    p = sub.add_parser("serve", help="開網頁介面與 REST API（狀態、進度、預覽）")
+    p.add_argument("--host", help="綁定位址，預設 127.0.0.1（或 VIDPIPE_HOST）")
+    p.add_argument("--port", type=int, help="預設 8320（或 VIDPIPE_PORT）")
+    p.add_argument("--no-open", action="store_true", help="不自動開瀏覽器")
+    p.add_argument("--allow-lan", action="store_true",
+                   help="允許綁非本機位址（Docker 裡必須；同時要設 VIDPIPE_API_TOKEN）")
+    p.add_argument("--no-auth", action="store_true",
+                   help="綁非本機位址也不要 token（外層已有保護時才用）")
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("doctor", help="檢查 ffmpeg、vidgrab、TTS 是否都就緒（JSON）")
     p.add_argument("--skip", help="略過的項目，逗號分隔（例如 vidgrab,tts）")
