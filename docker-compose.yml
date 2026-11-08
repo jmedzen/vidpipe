@@ -1,0 +1,75 @@
+# vidpipe + vidgrab 的完整組合。
+#
+#   cp .env.example .env        # 填 VIDPIPE_API_TOKEN、VIDGRAB_API_TOKEN、素材站金鑰
+#   docker compose up -d --build
+#   → 網頁介面 http://127.0.0.1:8311（要帶 token）
+#
+# 旁白由「主機上」的 audio.cpp 提供（Mac 上跑），容器用 host.docker.internal 連過去。
+# vidgrab 從 ${VIDGRAB_SRC}（預設 ../vidgrab）建映像；vidpipe 靠內部網路 http://vidgrab:8310 連它。
+name: vidpipe
+
+services:
+  vidgrab:
+    build:
+      context: ${VIDGRAB_SRC:-../vidgrab}
+      target: runtime
+    image: vidgrab:latest
+    restart: unless-stopped
+    environment:
+      VIDGRAB_API_TOKEN: ${VIDGRAB_API_TOKEN:?在 .env 設 VIDGRAB_API_TOKEN（openssl rand -hex 24）}
+      PIXABAY_API_KEY: ${PIXABAY_API_KEY:-}
+      JAMENDO_CLIENT_ID: ${JAMENDO_CLIENT_ID:-}
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+    volumes:
+      - vidgrab-data:/data          # 素材庫、cookie、設定
+    ports:
+      # vidgrab 自己的網頁介面（人看素材庫用）；不需要可刪掉。vidpipe 走內部網路，不靠這個。
+      - "127.0.0.1:8310:8310"
+    # 健康檢查沿用映像內建的（/api/version）
+
+  vidpipe:
+    build:
+      context: .
+      args:
+        VIDPIPE_BUILD: ${VIDPIPE_BUILD:-dev}
+    image: vidpipe:latest
+    restart: unless-stopped
+    command: ["serve", "--host", "0.0.0.0", "--allow-lan", "--no-open"]
+    depends_on:
+      vidgrab:
+        condition: service_healthy
+    environment:
+      VIDPIPE_API_TOKEN: ${VIDPIPE_API_TOKEN:?在 .env 設 VIDPIPE_API_TOKEN（openssl rand -hex 24）}
+      VIDPIPE_ALLOWED_HOSTS: ${VIDPIPE_ALLOWED_HOSTS:-}
+      VIDPIPE_VIDGRAB_URL: http://vidgrab:8310
+      VIDPIPE_VIDGRAB_TOKEN: ${VIDGRAB_API_TOKEN}
+      VIDPIPE_TTS_BASE_URL: ${VIDPIPE_TTS_BASE_URL:-http://host.docker.internal:8301}
+      VIDPIPE_TTS_TOKEN: ${VIDPIPE_TTS_TOKEN:-}
+      VIDPIPE_TTS_MODEL: ${VIDPIPE_TTS_MODEL:-}
+      VIDPIPE_VOICE_REF: ${VIDPIPE_VOICE_REF:-}
+      VIDPIPE_REFERENCE_TEXT: ${VIDPIPE_REFERENCE_TEXT:-}
+      VIDPIPE_SUBTITLE_LANGS: ${VIDPIPE_SUBTITLE_LANGS:-zh-TW}
+      VIDPIPE_SUBTITLE_FONT: ${VIDPIPE_SUBTITLE_FONT:-Noto Sans CJK TC}
+    extra_hosts:
+      # Linux 的 Docker Engine 沒有內建 host.docker.internal；Docker Desktop 本來就有，加了也無妨
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${VIDPIPE_BIND:-127.0.0.1}:${VIDPIPE_PUBLISH_PORT:-8311}:8320"
+    volumes:
+      - vidpipe-work:/data/work     # 中間產物、旁白快取、工作紀錄
+      - vidpipe-out:/data/out       # 成品（要直接拿檔案可改成 ./out:/data/out）
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:8320/api/version', timeout=4)"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  vidgrab-data:
+  vidpipe-work:
+  vidpipe-out:

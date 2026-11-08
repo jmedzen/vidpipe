@@ -7,6 +7,8 @@
 #   docker run --rm -e VIDPIPE_API_TOKEN="$(openssl rand -hex 24)" -p 127.0.0.1:8320:8320 \
 #     -v "$PWD/work:/data/work" vidpipe serve --host 0.0.0.0 --allow-lan --no-open
 #
+# 網頁介面＋vidgrab＋連主機 audio.cpp 的完整組合：docker compose up -d（見 docker-compose.yml）
+#
 # ffmpeg 是渲染引擎；fonts-noto-cjk 讓燒進影片的中文字幕不會變成方塊。
 # Docker 內連不到主機的 127.0.0.1：vidgrab / audio.cpp 的位址用 VIDPIPE_VIDGRAB_URL、
 # VIDPIPE_TTS_BASE_URL 指到 host.docker.internal 或實際 IP。
@@ -17,10 +19,14 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     VIDPIPE_BUILD=${VIDPIPE_BUILD} \
     VIDPIPE_WORK_DIR=/data/work \
-    VIDPIPE_OUT_DIR=/data/out
+    VIDPIPE_OUT_DIR=/data/out \
+    VIDPIPE_SUBTITLE_FONT="Noto Sans CJK TC"
 
+# fontconfig：ffmpeg 的 subtitles 濾鏡靠它找字體；fonts-noto-cjk 含 Noto Sans CJK TC（繁中）
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk fontconfig tini \
+ && fc-cache -f \
+ && fc-match "Noto Sans CJK TC" | grep -qi "Noto Sans CJK" \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -34,5 +40,5 @@ RUN pip install . \
 USER vidpipe
 VOLUME ["/data/work", "/data/out"]
 EXPOSE 8320
-ENTRYPOINT ["vidpipe"]
+ENTRYPOINT ["/usr/bin/tini", "--", "vidpipe"]
 CMD ["version"]

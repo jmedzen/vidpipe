@@ -22,14 +22,29 @@ vidpipe doctor          # 檢查 ffmpeg、vidgrab、TTS 是否都就緒
 
 ### Docker
 
+完整組合（vidpipe 網頁介面＋vidgrab＋連主機上的 audio.cpp）：
+
+```bash
+git clone https://github.com/jmedzen/vidgrab ../vidgrab    # compose 從這裡建 vidgrab 映像（可用 VIDGRAB_SRC 改位置）
+cp .env.example .env     # 填 VIDPIPE_API_TOKEN、VIDGRAB_API_TOKEN（openssl rand -hex 24）與 PIXABAY_API_KEY 等
+docker compose up -d --build
+# → http://127.0.0.1:8311（帶 token；vidgrab 在 8310）；docker compose ps 看 healthy
+docker compose exec vidpipe vidpipe doctor     # 檢查 ffmpeg、vidgrab、TTS
+```
+
+- **旁白**：audio.cpp 跑在主機上（預設 `http://host.docker.internal:8301`，`VIDPIPE_TTS_BASE_URL` 可改）。
+  容器連不到主機的 `127.0.0.1`，所以 audio.cpp 要聽 `0.0.0.0`；Linux 靠 compose 的 `extra_hosts: host-gateway`。
+  `VIDPIPE_VOICE_REF` 是 audio.cpp 那台主機上的路徑，不是容器內的。
+- **字幕字體**：映像有 ffmpeg 與 Noto Sans CJK TC（`VIDPIPE_SUBTITLE_FONT` 預設值），中文字幕不會變方塊。
+- **資料**：`/data/work`（中間產物、旁白快取）與 `/data/out`（成品）各是一個 volume；vidgrab 的素材庫在它自己的 volume。
+- **安全**：容器以非 root（uid 1000）執行；port 預設只對 `127.0.0.1` 發佈，`VIDPIPE_API_TOKEN` 必填。
+
+只跑 vidpipe 一個映像（vidgrab 在別處）：
+
 ```bash
 docker build --build-arg VIDPIPE_BUILD="$(git rev-list --count HEAD).$(git rev-parse --short HEAD)" -t vidpipe .
 docker run --rm vidpipe version
 ```
-
-映像內有 ffmpeg 與 Noto CJK 字型（燒中文字幕用）。容器連不到主機的 `127.0.0.1`，
-vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_URL` 指到
-`host.docker.internal` 或實際 IP。
 
 ## 設定
 
