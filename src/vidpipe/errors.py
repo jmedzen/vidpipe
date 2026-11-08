@@ -56,10 +56,28 @@ class DependencyMissing(VidpipeError):
 
 
 class UpstreamError(VidpipeError):
-    """vidgrab / audio.cpp 回了錯或連不上。通常重試有用。"""
+    """vidgrab / audio.cpp 回了錯或連不上。通常重試有用。
+
+    `upstream` 是哪個服務、`upstream_code` 是對方結構化錯誤裡的 code（有的話），
+    方便 agent 判斷是自己的參數錯還是對方壞了。
+    """
 
     code = "upstream_error"
     retryable = True
+
+    def __init__(self, message: str, *, upstream: str = "", upstream_code: str = "",
+                 hint: str | None = None, retryable: bool | None = None):
+        super().__init__(message, hint=hint, retryable=retryable)
+        self.upstream = upstream
+        self.upstream_code = upstream_code
+
+    def to_dict(self) -> dict[str, Any]:
+        data = super().to_dict()
+        if self.upstream:
+            data["error"]["upstream"] = self.upstream
+        if self.upstream_code:
+            data["error"]["upstream_code"] = self.upstream_code
+        return data
 
 
 class Timeout(VidpipeError):
