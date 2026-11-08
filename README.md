@@ -27,7 +27,7 @@ vidpipe doctor          # 檢查 ffmpeg、vidgrab、TTS 是否都就緒
 ```bash
 git clone https://github.com/jmedzen/vidgrab ../vidgrab    # compose 從這裡建 vidgrab 映像（可用 VIDGRAB_SRC 改位置）
 cp .env.example .env     # 填 VIDPIPE_API_TOKEN、VIDGRAB_API_TOKEN（openssl rand -hex 24）與 PIXABAY_API_KEY 等
-docker compose up -d --build
+./tools/compose-up.sh                 # = docker compose up -d --build，並帶入兩邊 git 的 build number
 # → http://127.0.0.1:8311（帶 token；vidgrab 在 8310）；docker compose ps 看 healthy
 docker compose exec vidpipe vidpipe doctor     # 檢查 ffmpeg、vidgrab、TTS
 ```
@@ -37,12 +37,13 @@ docker compose exec vidpipe vidpipe doctor     # 檢查 ffmpeg、vidgrab、TTS
   `VIDPIPE_VOICE_REF` 是 audio.cpp 那台主機上的路徑，不是容器內的。
 - **字幕字體**：映像有 ffmpeg 與 Noto Sans CJK TC（`VIDPIPE_SUBTITLE_FONT` 預設值），中文字幕不會變方塊。
 - **資料**：`/data/work`（中間產物、旁白快取）與 `/data/out`（成品）各是一個 volume；vidgrab 的素材庫在它自己的 volume。
+- **build number**：網頁左上角與 `/api/version` 顯示 `commit數.短sha`，每次 commit 都會變，可確認瀏覽器載到的是新版（頁面與靜態檔本來就是 `no-cache`）。Docker 建置沒有 `.git`，所以要用 `tools/compose-up.sh`（或單獨建用 `tools/docker-build.sh`）帶入；直接 `docker compose up --build` 會顯示 `dev`。
 - **安全**：容器以非 root（uid 1000）執行；port 預設只對 `127.0.0.1` 發佈，`VIDPIPE_API_TOKEN` 必填。
 
 只跑 vidpipe 一個映像（vidgrab 在別處）：
 
 ```bash
-docker build --build-arg VIDPIPE_BUILD="$(git rev-list --count HEAD).$(git rev-parse --short HEAD)" -t vidpipe .
+./tools/docker-build.sh                      # 自動帶 build number
 docker run --rm vidpipe version
 ```
 

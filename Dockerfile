@@ -1,6 +1,6 @@
 # vidpipe — Shorts 流水線
 #
-#   docker build --build-arg VIDPIPE_BUILD="$(git rev-list --count HEAD).$(git rev-parse --short HEAD)" -t vidpipe .
+#   ./tools/docker-build.sh
 #   docker run --rm -v "$PWD/work:/data/work" -v "$PWD/out:/data/out" vidpipe version
 #
 # 網頁介面（容器裡必須綁 0.0.0.0，所以要 --allow-lan 與 token；對外範圍由 -p 決定）：

@@ -1,7 +1,7 @@
 # vidpipe + vidgrab 的完整組合。
 #
 #   cp .env.example .env        # 填 VIDPIPE_API_TOKEN、VIDGRAB_API_TOKEN、素材站金鑰
-#   docker compose up -d --build
+#   ./tools/compose-up.sh       # = docker compose up -d --build，並帶入兩邊的 build number
 #   → 網頁介面 http://127.0.0.1:8311（要帶 token）
 #
 # 旁白由「主機上」的 audio.cpp 提供（Mac 上跑），容器用 host.docker.internal 連過去。
@@ -13,6 +13,8 @@ services:
     build:
       context: ${VIDGRAB_SRC:-../vidgrab}
       target: runtime
+      args:
+        VIDGRAB_BUILD: ${VIDGRAB_BUILD:-dev}   # 用 tools/compose-up.sh 會自動帶 git 的 build number
     image: vidgrab:latest
     restart: unless-stopped
     environment:
