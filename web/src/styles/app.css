@@ -105,7 +105,7 @@ aside {
   display: flex; flex-direction: column; gap: 18px; padding: 18px 14px;
   border-right: 1px solid var(--line); background: var(--aside-bg); overflow-y: auto;
 }
-main { padding: 26px 32px 48px; overflow-y: auto; min-width: 0; }
+main { --pad-top: 26px; padding: var(--pad-top) 32px 48px; overflow-y: auto; min-width: 0; }
 main > * { max-width: 920px; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px; }
 .logo {
@@ -130,7 +130,7 @@ nav { display: flex; flex-direction: column; gap: 3px; }
           border-bottom: 1px solid var(--line); padding: 10px 14px; }
   nav { flex-direction: row; }
   .side-foot { margin: 0 0 0 auto; flex-direction: row; align-items: center; }
-  main { padding: 18px 16px 40px; }
+  main { --pad-top: 18px; padding: var(--pad-top) 16px 40px; }
 }
 
 /* ---------------------------------------------------------- 按鈕 */
@@ -401,18 +401,20 @@ button.primary:hover:not(:disabled), a.button.primary:hover {
 .field label { font-weight: 600; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 820px) { .field-row { grid-template-columns: 1fr; } }
-input[type="text"], textarea {
+input[type="text"], input[type="number"], select, textarea {
   width: 100%; font: inherit; color: var(--text); background: var(--code-bg);
   border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px;
 }
 textarea { resize: vertical; line-height: 1.6; }
-input[type="text"]::placeholder, textarea::placeholder { color: var(--muted-text); opacity: .75; }
-input[type="text"]:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-input[aria-invalid="true"] { border-color: var(--bad); }
+input[type="text"]::placeholder, input[type="number"]::placeholder, textarea::placeholder { color: var(--muted-text); opacity: .75; }
+input[type="text"]:focus-visible, input[type="number"]:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--bad); }
 .field-problem { color: var(--bad); }
-.field.check { grid-template-columns: auto 1fr; align-items: start; gap: 10px; }
-.field.check input { margin-top: 5px; width: 16px; height: 16px; accent-color: var(--accent); }
-.field.check label { font-weight: 400; }
+.field.tick { grid-template-columns: auto 1fr; align-items: start; gap: 10px; }
+.field.tick input { margin-top: 5px; width: 16px; height: 16px; accent-color: var(--accent); }
+.field.tick label { font-weight: 400; }
 .form-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 .cand { padding: 6px 0; }
@@ -423,3 +425,29 @@ input[aria-invalid="true"] { border-color: var(--bad); }
 .alts[open] summary { margin-bottom: 4px; }
 .plan-none { color: var(--bad); }
 .banner button + button { margin-left: 0; }
+
+/* ---------------------------------------------------------- 編輯場景 */
+.scenes-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.editor-bar {
+  position: sticky; top: calc(-1 * var(--pad-top)); z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--accent);
+  border-radius: 12px;
+}
+.editor-bar > div { flex: 1; min-width: 200px; }
+.edit-scene { display: grid; gap: 14px; }
+.edit-scene .scene-head { margin-bottom: 0; }
+.field-label { font-weight: 600; }
+.field-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 820px) { .field-row.three { grid-template-columns: 1fr; } }
+select { appearance: auto; }
+.sentence-edit { display: grid; gap: 10px; }
+.sentence-row { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
+.sentence-row button { justify-self: start; }
+button.add { justify-self: start; }
+.swap { margin-top: 6px; }
+.swap summary { cursor: pointer; color: var(--accent-text); font-size: 13px; }
+.swap[open] summary { margin-bottom: 6px; }
+.swap .cand-head, .cand-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.swap-manual { margin-top: 10px; display: grid; gap: 4px; }
+.swap-row { display: flex; gap: 8px; }
+.swap-row input { flex: 1; min-width: 0; }

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CopyButton } from '../components/CopyButton'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { JobDot } from '../components/JobDot'
+import { CandidateLine, LicenseBadge, Pill } from '../components/Pills'
 import { ProgressBar } from '../components/ProgressBar'
 import { ApiFailure, deleteJson, getText, postJson, useApi } from '../lib/api'
 import {
-  JOB_TEXT, ORIENT_TEXT, RUNNING_TEXT, SHORT_STAGE_LEVEL, SHORT_STAGE_TEXT, bytesText, dateTimeIso, durationText,
-  elapsed, licenseTone, stageText, stamp,
+  JOB_TEXT, RUNNING_TEXT, SHORT_STAGE_LEVEL, SHORT_STAGE_TEXT, bytesText, dateTimeIso, durationText,
+  elapsed, stageText, stamp,
 } from '../lib/format'
 import { useAction } from '../lib/useAction'
 import type {
@@ -15,20 +16,12 @@ import type {
   TimelineScene,
 } from '../types'
 import { CancelButton, kindText, useTick } from './Jobs'
+import { SceneEditor } from './SceneEditor'
 
 /* ---------------------------------------------------------- 共用小元件 */
 
-function Pill({ tone = 'plain', children }: { tone?: 'plain' | 'ok' | 'note' | 'warn'; children: React.ReactNode }) {
-  return <span className={`pill pill-${tone}`}>{children}</span>
-}
-
 function StagePill({ stage }: { stage: ShortSummary['stage'] }) {
   return <Pill tone={SHORT_STAGE_LEVEL[stage]}>{SHORT_STAGE_TEXT[stage]}</Pill>
-}
-
-function LicenseBadge({ kind, label }: { kind: string | undefined; label: string | undefined }) {
-  const tone = licenseTone(kind)
-  return <Pill tone={tone}>{tone === 'warn' ? '⚠ ' : ''}{label || '授權未明'}</Pill>
 }
 
 function LicensePill({ credit }: { credit: SourceCredit }) {
@@ -206,11 +199,19 @@ function TimeButton({ at, onSeek, label }: { at: number; onSeek?: (t: number) =>
   )
 }
 
-function ScenesPanel({ short, active, onSeek }: { short: ShortDetail; active: number | null; onSeek?: (t: number) => void }) {
+function ScenesPanel({ short, active, onSeek, onEdit }: {
+  short: ShortDetail; active: number | null; onSeek?: (t: number) => void; onEdit?: () => void
+}) {
   const rows = useMemo(() => sceneRows(short), [short])
   const warnings = short.timeline?.warnings ?? []
   return (
     <>
+      {onEdit && (
+        <div className="scenes-bar">
+          <span className="muted small">旁白、畫面適配、素材與音樂都可以改；儲存後再重新做。</span>
+          <button type="button" onClick={onEdit}>編輯場景</button>
+        </div>
+      )}
       {warnings.length > 0 && (
         <div className="banner warn" role="status">
           <div>
@@ -489,24 +490,6 @@ function JobsPanel({ jobs }: { jobs: JobBrief[] }) {
 
 /* ---------------------------------------------------------- 分頁：挑素材（plan 的報告） */
 
-function CandidateLine({ cand }: { cand: PlanCandidate }) {
-  return (
-    <div className="cand">
-      {cand.webpage_url
-        ? <a href={cand.webpage_url} target="_blank" rel="noreferrer">{cand.title || cand.asset_id}</a>
-        : <span>{cand.title || cand.asset_id}</span>}
-      <div className="pills">
-        <LicenseBadge kind={cand.license.kind} label={cand.license.label} />
-        <Pill>{ORIENT_TEXT[cand.orientation] ?? cand.orientation}</Pill>
-        {cand.duration ? <Pill>{cand.duration} 秒</Pill> : null}
-        {cand.author && <span className="muted small">{cand.author}</span>}
-        <code>{cand.asset_id}</code>
-      </div>
-      {cand.why && <p className="muted small">{cand.why}</p>}
-    </div>
-  )
-}
-
 function Alternatives({ items }: { items: PlanCandidate[] }) {
   if (items.length === 0) return null
   return (
@@ -634,6 +617,7 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
   useEffect(() => setRefresh(running ? 2000 : 0), [running])
   const action = useAction()
   const [confirming, setConfirming] = useState(false)
+  const [editing, setEditing] = useState(false)
   const { reload } = detail
 
   const video = useRef<HTMLVideoElement>(null)
@@ -655,8 +639,12 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
   const mp4 = short ? fileOf(short.files, `${short.id}.mp4`) : undefined
   const canMake = !!short && !!short.manifest && short.manifest_source !== 'draft' && !running
   const canReplan = !!short && short.manifest_source === 'draft' && !!short.manifest && !running
+  const canEdit = !!short && !!short.manifest && !!short.manifest_revision && !running
+    && (short.manifest_source === 'manifest' || short.manifest_source === 'plan')
   const failed = job?.status === 'failed'
-  const makeLabel = failed ? '重跑' : short?.stage === 'rendered' ? '重新做一次' : '做成片'
+  const outdated = short?.outdated === true && !running
+  const makeLabel = failed ? '重跑' : outdated ? '重新做（套用修改）'
+    : short?.stage === 'rendered' ? '重新做一次' : '做成片'
 
   // 旁白、素材、已渲染的場景都在快取裡，所以「重跑」只會補做缺的那些
   const make = () => {
@@ -698,8 +686,9 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
             </div>
             <div className="head-actions">
               {canMake && (
-                <button type="button" className={short.stage === 'rendered' && !failed ? undefined : 'primary'}
-                        onClick={make} disabled={action.busy}>
+                <button type="button"
+                        className={short.stage === 'rendered' && !failed && !outdated ? undefined : 'primary'}
+                        onClick={make} disabled={action.busy || editing}>
                   {makeLabel}
                 </button>
               )}
@@ -730,6 +719,15 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
                 {action.busy ? '刪除中…' : '確定刪除'}
               </button>
               <button type="button" onClick={() => setConfirming(false)} disabled={action.busy}>不要</button>
+            </div>
+          )}
+          {outdated && !editing && (
+            <div className="banner" role="status">
+              <div>
+                <strong>manifest 改過了，{short.stage === 'rendered' ? '成片' : '旁白'}還是舊的</strong>
+                <p>按「{makeLabel}」套用；旁白與場景有快取，只有改到的部分會重做。</p>
+              </div>
+              <button type="button" className="primary" onClick={make} disabled={action.busy}>{makeLabel}</button>
             </div>
           )}
           {running && job && <RunningJob job={job} onChanged={reload} />}
@@ -765,7 +763,17 @@ export function ShortDetailPage({ id, tab }: { id: string; tab: string }) {
                   </a>
                 ))}
               </nav>
-              {current === 'scenes' && <ScenesPanel short={short} active={active} onSeek={mp4 ? seek : undefined} />}
+              {editing && (
+                <div hidden={current !== 'scenes'}>
+                  <SceneEditor short={short} locked={running}
+                               onSaved={() => { setEditing(false); reload() }}
+                               onLeave={() => { setEditing(false); reload() }} />
+                </div>
+              )}
+              {current === 'scenes' && !editing && (
+                <ScenesPanel short={short} active={active} onSeek={mp4 ? seek : undefined}
+                             onEdit={canEdit ? () => setEditing(true) : undefined} />
+              )}
               {current === 'plan' && <PlanPanel plan={short.plan} planning={running && job?.kind === 'plan'} retry={canReplan} />}
               {current === 'credits' && <CreditsPanel short={short} />}
               {current === 'files' && <FilesPanel files={short.files} />}

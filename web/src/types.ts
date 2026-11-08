@@ -204,7 +204,25 @@ export interface ManifestScene {
   text?: string
   sentences?: { text: string; en?: string }[]
   query?: string | string[]
-  clip?: { asset_id?: string; path?: string }
+  clip?: { asset_id?: string; path?: string; start?: number }
+  fit?: string
+  min_duration?: number
+  [key: string]: unknown
+}
+
+export interface ManifestMusic {
+  asset_id?: string
+  path?: string
+  start?: number
+  volume?: number
+  duck_under_voice?: boolean
+}
+
+export interface Manifest {
+  id: string
+  title?: string
+  scenes: ManifestScene[]
+  music?: ManifestMusic
   [key: string]: unknown
 }
 
@@ -248,8 +266,12 @@ export interface PlanReport {
 }
 
 export interface ShortDetail extends ShortSummary {
-  manifest: { id: string; title?: string; scenes: ManifestScene[]; [key: string]: unknown } | null
+  manifest: Manifest | null
   manifest_source: ManifestSource | null
+  /** 編輯時帶回去的版本號；PUT 時內容已經不是這一份就會 409。 */
+  manifest_revision: string | null
+  /** manifest 比上次做出來的新：true 要重做、false 是最新、null 還沒做過。 */
+  outdated: boolean | null
   plan: PlanReport | null
   timeline: ShortTimeline | null
   sources: ShortSources | null
