@@ -1,7 +1,8 @@
 # vidpipe + vidgrab — Synology DSM「Container Manager」專案用，整份貼上就能跑。
 #
 # 用法（DSM 7.2+）：Container Manager → 專案 → 新增 → 來源選「建立 docker-compose.yml」→ 貼上這份。
-#   1. 只需要改標了「★ 要改」的地方（3 個 token／金鑰、TTS 位址）；其餘不用動。
+#   1. 只需要改標了「★ 要改」的地方（素材站金鑰、TTS 位址）；其餘不用動。
+#      預設「不用 token」：兩個網頁介面在區網內直接開，沒有登入（理由與要改回有 token 的做法見下面 environment 的註解）。
 #   2. 這份檔案不含任何變數替換（美元符號大括號那種）、不需要 .env、不需要 tools/compose-up.sh，也不在 NAS 上 build：
 #      映像從 GitHub Container Registry 直接 pull（ghcr.io/jmedzen/vidgrab、ghcr.io/jmedzen/vidpipe）。
 #      如果 pull 出現 denied／unauthorized：套件還是私有的 → 到 GitHub 把兩個套件設成 Public，
@@ -10,8 +11,10 @@
 #        cd /volume1/docker/vidpipe && mkdir -p data/vidgrab data/work data/out data/config
 #        sudo chown -R 1000:1000 data
 #      沒先建的話 Docker 會自己建成 root 的資料夾，容器（uid 1000）寫不進去，會一啟動就報 Permission denied。
+#      想用 DSM 自己的使用者當擁有者而不 chown：SSH 執行 `id <使用者名稱>` 看 uid 和 gid，
+#      把下面兩個服務的 user: "1000:1000" 改成那組（例如 "1026:100"），資料夾擁有者要同一組。
 #   4. 啟動後：vidpipe 網頁介面  http://<NAS-IP>:8320   vidgrab 網頁介面  http://<NAS-IP>:8310
-#      兩邊都要輸入 token（就是下面你設的那串）。
+#      直接開，不用輸入任何東西。
 #
 # audio.cpp（旁白 TTS）需要 GPU，不在 NAS 上，留在 MacBook Pro：容器經區網連 TTS 位址。
 # Mac 要有固定 IP，而且 audio.cpp 要聽區網位址（--host <Mac 的 IP>），見 README。
@@ -22,10 +25,13 @@ services:
     image: ghcr.io/jmedzen/vidgrab:latest
     container_name: vidgrab
     restart: unless-stopped
+    user: "1000:1000"      # uid:gid，要等於 ./data 資料夾的擁有者（見檔頭第 3 點）
     environment:
-      # ★ 要改：vidgrab 的 token，隨便一串長亂碼（SSH 裡 `openssl rand -hex 24` 產生）。
-      #   跟下面 vidpipe 的 VIDPIPE_VIDGRAB_TOKEN 必須是同一串。
-      VIDGRAB_API_TOKEN: "change-me-vidgrab-token"
+      # 不用 token：區網內的人連得到 8310 就能用。NAS 只在內網、路由器沒有轉送 8310／8320 到外網時風險很低；
+      #   絕對不要把這兩個 port 轉送到外網（等於把下載與出片功能開給所有人）。
+      #   想要登入：把這行改成 "0"，並加一行 VIDGRAB_API_TOKEN: "你的長亂碼"（openssl rand -hex 24），
+      #   再到 vidpipe 加 VIDPIPE_VIDGRAB_TOKEN 填同一串。
+      VIDGRAB_NO_AUTH: "1"
       # ★ 要改（沒有的就留空，那個來源會被略過）：素材站金鑰
       PIXABAY_API_KEY: ""         # 主力來源：https://pixabay.com/api/docs/
       JAMENDO_CLIENT_ID: ""       # 背景音樂：https://devportal.jamendo.com/
@@ -47,17 +53,17 @@ services:
     image: ghcr.io/jmedzen/vidpipe:latest
     container_name: vidpipe
     restart: unless-stopped
+    user: "1000:1000"      # 同上
     command: ["serve", "--host", "0.0.0.0", "--allow-lan", "--no-open"]
     depends_on:
       vidgrab:
         condition: service_healthy
     environment:
-      # ★ 要改：vidpipe 網頁介面／HTTP API 的 token（必填，另一串長亂碼）
-      VIDPIPE_API_TOKEN: "change-me-vidpipe-token"
+      # 不用 token（理由同上）。想要登入：刪掉 VIDPIPE_NO_AUTH 這行，改填 VIDPIPE_API_TOKEN: "你的長亂碼"。
+      VIDPIPE_NO_AUTH: "1"
 
-      # 容器之間用服務名連，不用改。token 要跟上面 vidgrab 的 VIDGRAB_API_TOKEN 同一串。
+      # 容器之間用服務名連，不用改。（vidgrab 有開 token 的話，要加 VIDPIPE_VIDGRAB_TOKEN 填同一串。）
       VIDPIPE_VIDGRAB_URL: "http://vidgrab:8310"
-      VIDPIPE_VIDGRAB_TOKEN: "change-me-vidgrab-token"
 
       # ★ 要改：旁白 TTS = MacBook Pro 上的 audio.cpp（區網 IP:8301）。
       #   不能寫 localhost／host.docker.internal；Mac 沒開機或 audio.cpp 沒跑時，出旁白那步會失敗。
