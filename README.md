@@ -9,7 +9,7 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
   完整做法見 [docs/agent-recipe.md](docs/agent-recipe.md)
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、每支片做到哪、預覽成品、進度與工作紀錄
 
-> 狀態：整條流水線都能用了：`plan`（挑素材與音樂）→ `narrate`（逐句旁白、時間軸、字幕）→ `render`（9:16 成片、背景音樂 ducking、響度標準化、封面、credits），或 `make` 一次做完；`doctor` 檢查環境。入口有四種：CLI、HTTP API、MCP（stdio 與 HTTP，含 `plan_short`）、網頁介面（`vidpipe serve`：作品頁、編輯場景、換素材、六組主題）。
+> 狀態：整條流水線都能用了：`plan`（挑素材與音樂）→ `narrate`（逐句旁白、時間軸、字幕）→ `render`（9:16 成片、背景音樂 ducking、響度標準化、封面、credits），或 `make` 一次做完；`doctor` 檢查環境。入口有四種：CLI、HTTP API、MCP（stdio 與 HTTP，含 `plan_short`）、網頁介面（`vidpipe serve`：作品頁、編輯場景、換素材、可直接改設定的設定頁、六組主題；macOS 可點兩下 `start-vidpipe-8320.command`）。
 
 ## 快速開始
 
@@ -83,8 +83,8 @@ docker run --rm vidpipe version
 - **網頁的「設定」頁可以直接改這些項目**（寫回上面那個設定檔，見[網頁介面](#網頁介面)）：被環境變數指定的項目會上鎖，
   token 存進設定檔是明文（檔案權限 600，`vidpipe.json` 不進版控），有環境變數可用時祕密放環境變數更安全。
   `VIDPIPE_SETTINGS_READONLY=1` 讓設定頁（與 API）變成唯讀，給「對外開放但不想讓人改設定」的部署。
-以上每一項都能用 `VIDPIPE_` 加大寫名稱設定（例如 `VIDPIPE_SUBTITLE_FONT`、`VIDPIPE_TARGET_LUFS`）。
-伺服器另外認這幾個（不在設定檔裡）：`VIDPIPE_HOST`、`VIDPIPE_PORT`、`VIDPIPE_API_TOKEN`、`VIDPIPE_NO_AUTH`、`VIDPIPE_ALLOWED_HOSTS`（見[安全](#mcp讓-claude-code-直接用-vidpipe)）。
+- 上表每一項都能用 `VIDPIPE_` 加大寫名稱設定（例如 `VIDPIPE_SUBTITLE_FONT`、`VIDPIPE_TARGET_LUFS`）。
+- 伺服器另外認這幾個（不在設定檔裡）：`VIDPIPE_HOST`、`VIDPIPE_PORT`、`VIDPIPE_API_TOKEN`、`VIDPIPE_NO_AUTH`、`VIDPIPE_ALLOWED_HOSTS`（見[安全](#mcp讓-claude-code-直接用-vidpipe)）。
 
 ## split／speak：分句與逐句旁白
 
