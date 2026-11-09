@@ -6,7 +6,11 @@
 #      映像從 GitHub Container Registry 直接 pull（ghcr.io/jmedzen/vidgrab、ghcr.io/jmedzen/vidpipe）。
 #      如果 pull 出現 denied／unauthorized：套件還是私有的 → 到 GitHub 把兩個套件設成 Public，
 #      或先在 NAS 的 SSH 用 `docker login ghcr.io`（帳號 jmedzen、密碼用有 read:packages 的 token）。
-#   3. 啟動後：vidpipe 網頁介面  http://<NAS-IP>:8311   vidgrab 網頁介面  http://<NAS-IP>:8310
+#   3. 先建資料夾（專案資料夾下，例如專案放 /volume1/docker/vidpipe）並讓容器的 uid 1000 寫得進去，SSH 執行：
+#        cd /volume1/docker/vidpipe && mkdir -p data/vidgrab data/work data/out data/config
+#        sudo chown -R 1000:1000 data
+#      沒先建的話 Docker 會自己建成 root 的資料夾，容器（uid 1000）寫不進去，會一啟動就報 Permission denied。
+#   4. 啟動後：vidpipe 網頁介面  http://<NAS-IP>:8311   vidgrab 網頁介面  http://<NAS-IP>:8310
 #      兩邊都要輸入 token（就是下面你設的那串）。
 #
 # audio.cpp（旁白 TTS）需要 GPU，不在 NAS 上，留在 MacBook Pro：容器經區網連 TTS 位址。
@@ -29,11 +33,8 @@ services:
     ports:
       - "8310:8310"               # vidgrab 網頁介面（人看素材庫用）；vidpipe 走內部網路，不靠這個
     volumes:
-      # 素材庫、cookie、設定。預設用 Docker volume，不用管權限。
-      - vidgrab-data:/data
-      # 想放在共用資料夾就改成（資料夾要先建好，並讓 uid 1000 寫得進去：
-      #   SSH 執行 sudo chown -R 1000:1000 /volume1/docker/vidpipe/vidgrab ）：
-      # - /volume1/docker/vidpipe/vidgrab:/data
+      # 素材庫、cookie、設定。相對路徑 = 相對於這個專案的資料夾（建立專案時選的路徑，例如 /volume1/docker/vidpipe）。
+      - ./data/vidgrab:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8310/api/version', timeout=4)"]
       interval: 30s
@@ -63,7 +64,7 @@ services:
       #   寫在這裡，設定頁會顯示「由環境變數指定」並鎖住；想在網頁改就把值清成 ""（空字串 = 沒設）。
       VIDPIPE_TTS_BASE_URL: "http://192.168.2.66:8301"
 
-      # 以下都是選填，留空 = 在網頁「設定」頁改（存在 vidpipe-config volume，重建容器後還在）
+      # 以下都是選填，留空 = 在網頁「設定」頁改（存在 ./data/config，重建容器後還在）
       VIDPIPE_TTS_TOKEN: ""            # audio.cpp 有設密碼才填
       VIDPIPE_TTS_MODEL: ""
       VIDPIPE_VOICE_REF: ""            # 音色參考音檔：路徑是「Mac 上」的路徑，不是 NAS 的
@@ -78,24 +79,12 @@ services:
     ports:
       - "8311:8320"                    # NAS 的 8311 → 容器內 vidpipe 的 8320
     volumes:
-      # 中間產物、旁白快取、工作紀錄 / 成品 / 設定頁存的 vidpipe.json。預設用 Docker volume，不用管權限。
-      - vidpipe-work:/data/work
-      - vidpipe-out:/data/out
-      - vidpipe-config:/data/config
-      # 想直接從網路磁碟拿成品，把 out 那行換成（資料夾先建好，SSH 執行
-      #   sudo chown -R 1000:1000 /volume1/docker/vidpipe ）：
-      # - /volume1/docker/vidpipe/out:/data/out
-      # - /volume1/docker/vidpipe/work:/data/work
-      # - /volume1/docker/vidpipe/config:/data/config
+      - ./data/work:/data/work        # 中間產物、旁白快取、工作紀錄
+      - ./data/out:/data/out          # 成品（直接從網路磁碟拿檔案）
+      - ./data/config:/data/config    # 設定頁存的 vidpipe.json
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8320/api/version', timeout=4)"]
       interval: 30s
       timeout: 5s
       start_period: 15s
       retries: 3
-
-volumes:
-  vidgrab-data:
-  vidpipe-work:
-  vidpipe-out:
-  vidpipe-config:

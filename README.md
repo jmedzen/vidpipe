@@ -74,8 +74,9 @@ Container Manager →「專案」→ 新增 →「建立 docker-compose.yml」�
   或在 NAS 的 SSH 先 `sudo docker login ghcr.io -u jmedzen`（密碼貼有 `read:packages` 的 personal access token）。
 - **網址**：vidpipe `http://<NAS-IP>:8311`、vidgrab `http://<NAS-IP>:8310`，都要輸入 token。
   「開啟 vidgrab」按鈕要到「設定」頁填 `http://<NAS-IP>:8310`（compose 裡留空，才不會被環境變數鎖住）。
-- **資料**預設放 Docker volume，不用管權限；要放共用資料夾就改用檔案裡註解的 `/volume1/docker/...` 寫法，
-  並先 `sudo chown -R 1000:1000 <資料夾>`（容器以 uid 1000 執行）。
+- **資料**用專案資料夾下的相對路徑 bind mount（`./data/vidgrab`、`./data/work`、`./data/out`、`./data/config`），沒有用 Docker volume。
+  **先建資料夾並給 uid 1000 寫入權限**（SSH：`cd <專案資料夾> && mkdir -p data/vidgrab data/work data/out data/config && sudo chown -R 1000:1000 data`），
+  沒先建的話 Docker 會建成 root 的資料夾，容器一啟動就 Permission denied。成品在 `data/out`，可直接從網路磁碟拿。
 - **更新**：新版映像發佈後，在 NAS 的 SSH 執行 `sudo docker compose -p <專案名> pull && sudo docker compose -p <專案名> up -d`
   （專案名就是 Container Manager 裡的專案名稱）。網頁左上角的 build 會變。
 
