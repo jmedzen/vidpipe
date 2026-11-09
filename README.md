@@ -64,15 +64,14 @@ docker run --rm vidpipe version
 
 NAS 上不想 clone、不想 build，用 [`docker-compose.dsm.yml`](docker-compose.dsm.yml)：整份貼進
 Container Manager →「專案」→ 新增 →「建立 docker-compose.yml」。裡面沒有 `${變數}`，不需要 `.env`，
-只要改標了「★ 要改」的幾行（`VIDGRAB_API_TOKEN`／`VIDPIPE_VIDGRAB_TOKEN` 要同一串、`VIDPIPE_API_TOKEN`、
-素材站金鑰、`VIDPIPE_TTS_BASE_URL` = Mac 上 audio.cpp 的 `http://<Mac 區網 IP>:8301`）。
+只要改標了「★ 要改」的幾行（素材站金鑰、`VIDPIPE_TTS_BASE_URL` = Mac 上 audio.cpp 的 `http://<Mac 區網 IP>:8301`）。
 
 - **映像**來自 GitHub Container Registry：`ghcr.io/jmedzen/vidpipe`、`ghcr.io/jmedzen/vidgrab`（amd64＋arm64），
   由各自 repo 的 `publish` workflow 在 push 到 `main` 時發佈（也可在 Actions 頁手動執行）。**第一次要先跑過一次 publish**，
   NAS 才拉得到。
 - **套件預設是私有的**：pull 出現 `denied`／`unauthorized` 時，二選一——到 GitHub 的 Packages 頁把兩個套件設成 Public；
   或在 NAS 的 SSH 先 `sudo docker login ghcr.io -u jmedzen`（密碼貼有 `read:packages` 的 personal access token）。
-- **網址**：vidpipe `http://<NAS-IP>:8320`、vidgrab `http://<NAS-IP>:8310`，都要輸入 token。
+- **網址**：vidpipe `http://<NAS-IP>:8320`、vidgrab `http://<NAS-IP>:8310`，預設不用登入（compose 設了 `VIDGRAB_NO_AUTH`／`VIDPIPE_NO_AUTH`，區網內直接開；**不要把 8310／8320 轉送到外網**）。要登入就照 compose 註解改成 token。
   「開啟 vidgrab」按鈕要到「設定」頁填 `http://<NAS-IP>:8310`（compose 裡留空，才不會被環境變數鎖住）。
 - **資料**用專案資料夾下的相對路徑 bind mount（`./data/vidgrab`、`./data/work`、`./data/out`、`./data/config`），沒有用 Docker volume。
   **先建資料夾並給 uid 1000 寫入權限**（SSH：`cd <專案資料夾> && mkdir -p data/vidgrab data/work data/out data/config && sudo chown -R 1000:1000 data`），
