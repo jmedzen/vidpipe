@@ -10,6 +10,8 @@
 #        cd /volume1/docker/vidpipe && mkdir -p data/vidgrab data/work data/out data/config
 #        sudo chown -R 1000:1000 data
 #      沒先建的話 Docker 會自己建成 root 的資料夾，容器（uid 1000）寫不進去，會一啟動就報 Permission denied。
+#      想用 DSM 自己的使用者當擁有者而不 chown：SSH 執行 `id <使用者名稱>` 看 uid 和 gid，
+#      把下面兩個服務的 user: "1000:1000" 改成那組（例如 "1026:100"），資料夾擁有者要同一組。
 #   4. 啟動後：vidpipe 網頁介面  http://<NAS-IP>:8320   vidgrab 網頁介面  http://<NAS-IP>:8310
 #      兩邊都要輸入 token（就是下面你設的那串）。
 #
@@ -22,6 +24,7 @@ services:
     image: ghcr.io/jmedzen/vidgrab:latest
     container_name: vidgrab
     restart: unless-stopped
+    user: "1000:1000"      # uid:gid，要等於 ./data 資料夾的擁有者（見檔頭第 3 點）
     environment:
       # ★ 要改：vidgrab 的 token，隨便一串長亂碼（SSH 裡 `openssl rand -hex 24` 產生）。
       #   跟下面 vidpipe 的 VIDPIPE_VIDGRAB_TOKEN 必須是同一串。
@@ -47,6 +50,7 @@ services:
     image: ghcr.io/jmedzen/vidpipe:latest
     container_name: vidpipe
     restart: unless-stopped
+    user: "1000:1000"      # 同上
     command: ["serve", "--host", "0.0.0.0", "--allow-lan", "--no-open"]
     depends_on:
       vidgrab:
