@@ -405,3 +405,45 @@ def test_cancel_endpoint_rejects_cross_site_requests(start, tmp_path):
 def test_cancel_unknown_job_is_404(start):
     resp = start().post("/api/job/20260101-000000-abcdef/cancel")
     assert resp.status_code == 404
+
+
+# ------------------------------------------------------------ vidgrab 開啟位址
+
+@pytest.mark.parametrize("url,public,want,source", [
+    ("http://127.0.0.1:8310", "", "http://127.0.0.1:8310", "derived"),
+    ("http://localhost:8310/", "", "http://localhost:8310", "derived"),
+    ("http://192.168.1.5:8310", "", "http://192.168.1.5:8310", "derived"),
+    ("http://nas.local:8310", "", "http://nas.local:8310", "derived"),
+    ("http://host.docker.internal:8310", "", "http://localhost:8310", "derived"),
+    ("http://vidgrab:8310", "", None, "none"),
+    ("http://vidgrab:8310", "http://192.168.1.5:8310/", "http://192.168.1.5:8310", "public"),
+])
+def test_config_exposes_browser_facing_vidgrab_url(start, monkeypatch, url, public, want, source):
+    monkeypatch.setenv("VIDPIPE_VIDGRAB_URL", url)
+    monkeypatch.setenv("VIDPIPE_VIDGRAB_PUBLIC_URL", public)
+    body = start().get("/api/config").json()
+    assert body["vidgrab_open"]["url"] == want and body["vidgrab_open"]["source"] == source
+    if want is None:
+        assert "VIDPIPE_VIDGRAB_PUBLIC_URL" in body["vidgrab_open"]["hint"]
+
+
+def test_vidgrab_url_with_credentials_is_refused_without_echoing_them(start, monkeypatch):
+    """網址裡不收帳密：設定頁會原樣顯示網址、錯誤訊息也帶網址，祕密不能跟著出現。"""
+    monkeypatch.setenv("VIDPIPE_VIDGRAB_URL", "http://user:pw-secret@vidgrab:8310")
+    resp = start().get("/api/config")
+    assert resp.status_code == 500 and _err(resp)["code"] == "bad_config"
+    assert "pw-secret" not in resp.text
+
+
+def test_vidgrab_open_hint_redacts_credentials_even_if_the_config_is_built_by_hand():
+    from vidpipe.config import Config, vidgrab_open_url
+
+    out = vidgrab_open_url(Config(vidgrab_url="http://user:pw-secret@vidgrab:8310"))
+    assert out["url"] is None and "pw-secret" not in out["hint"]
+
+
+@pytest.mark.parametrize("bad", ["vidgrab:8310", "ftp://x:1", "http://u:p@h:1", "http://"])
+def test_bad_public_url_is_a_structured_500(start, monkeypatch, bad):
+    monkeypatch.setenv("VIDPIPE_VIDGRAB_PUBLIC_URL", bad)
+    resp = start().get("/api/config")
+    assert resp.status_code == 500 and _err(resp)["code"] == "bad_config"

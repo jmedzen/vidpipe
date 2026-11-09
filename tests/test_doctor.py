@@ -53,6 +53,16 @@ def test_cjk_font_found_via_fc_list(monkeypatch):
     assert c["ok"] and not c["required"] and "Noto" in c["detail"]
 
 
+def test_cjk_font_unescapes_fc_list_backslashes(monkeypatch):
+    """fc-list 輸出 `Unifont\\-JP`；填進設定頁的字體欄、或給人看的，都不該帶反斜線。"""
+    class P:
+        stdout = "Unifont\\-JP\nNoto Sans CJK TC\n"
+
+    monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/fc-list" if n == "fc-list" else None)
+    monkeypatch.setattr(doctor, "_run", lambda *_a, **_k: P)
+    assert doctor.check_cjk_font()["detail"] == "Unifont-JP"
+
+
 def test_dirs_created_and_unwritable_reported(tmp_path):
     assert doctor.check_dirs(_cfg(tmp_path))["ok"] is True
     blocker = tmp_path / "file"

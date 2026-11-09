@@ -35,6 +35,7 @@ from typing import Any
 from . import config as config_mod
 from . import jobs as jobs_mod
 from . import mcp as mcp_mod
+from . import settings as settings_mod
 from . import shorts as shorts_mod
 from .errors import BadInput, VidpipeError, from_exception
 from .version import __version__, build, full_version
@@ -53,7 +54,8 @@ LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
 # 結構化錯誤 code ↔ HTTP 狀態（跟 CLI 的 code 同一套）
 ERROR_STATUS = {
     "bad_input": 400, "unauthorized": 401, "forbidden": 403, "not_found": 404,
-    "method_not_allowed": 405, "conflict": 409, "stale_manifest": 409, "clip_too_short": 400,
+    "method_not_allowed": 405, "conflict": 409, "stale_manifest": 409, "stale_config": 409,
+    "clip_too_short": 400,
     "cancelled": 409,
     "upstream_error": 502, "dependency_missing": 503, "timeout": 504,
     "bad_config": 500, "render_failed": 500, "internal": 500,
@@ -267,7 +269,10 @@ class Handler(BaseHTTPRequestHandler):
             elif route == "/api/config":
                 cfg = config_mod.load()
                 self._json({"ok": True, "path": str(config_mod.config_path()),
-                            "config": cfg.to_dict(mask=True)})
+                            "config": cfg.to_dict(mask=True),
+                            "vidgrab_open": config_mod.vidgrab_open_url(cfg)})
+            elif route == "/api/settings":
+                self._json({"ok": True, **settings_mod.describe()})
             elif route == "/api/doctor":
                 self._doctor(query)
             elif route == "/api/jobs":
@@ -315,6 +320,19 @@ class Handler(BaseHTTPRequestHandler):
             elif self.command == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "short"]:
                 self._json({"ok": True, **shorts_mod.delete(
                     config_mod.load(), urllib.parse.unquote(parts[2]))})
+            elif self.command == "PUT" and route == "/api/settings":
+                body = self._body()
+                revision = body.get("revision")
+                if revision is not None and not isinstance(revision, str):
+                    raise BadInput("revision 要是字串")
+                self._json({"ok": True, **settings_mod.apply(
+                    body.get("changes") or {}, revision=revision,
+                    replace_invalid=body.get("replace_invalid") is True)})
+            elif self.command == "POST" and route == "/api/settings/test":
+                body = self._body()
+                self._json({"ok": True, **settings_mod.run_test(
+                    str(body.get("target") or ""), body.get("values"),
+                    deep=body.get("deep") is True)})
             elif self.command == "POST" and route == "/api/validate":
                 manifest, _ = shorts_mod.parse_document(self._manifest_doc())
                 self._json({"ok": True, **shorts_mod.describe(manifest)})

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Iterable
@@ -73,7 +74,9 @@ def check_cjk_font() -> Check:
         try:
             out = (_run([fc, ":lang=zh", "family"]).stdout or "").strip()
             if out:
-                return _check("cjk_font", True, out.splitlines()[0], required=False)
+                # fc-list 會把 `-` 之類的字元加反斜線（`Unifont\-JP`）；給人看的要還原
+                first = re.sub(r"\\(.)", r"\1", out.splitlines()[0])
+                return _check("cjk_font", True, first, required=False)
         except (OSError, subprocess.SubprocessError):
             pass
     for root in _FONT_DIRS:
@@ -122,7 +125,9 @@ def check_vidgrab(client: VidgrabClient) -> Check:
     return _check("vidgrab", True, f"vidgrab {version}")
 
 
-def check_tts(client: TTSClient, wanted_model: str = "") -> Check:
+def check_tts(client: TTSClient, wanted_model: str = "",
+              models_out: list[str] | None = None) -> Check:
+    """`models_out` 給了就把已載入的模型 id 放進去（設定頁的「測試連線」用，免得再問一次）。"""
     try:
         client.health()
     except VidpipeError as exc:
@@ -135,6 +140,8 @@ def check_tts(client: TTSClient, wanted_model: str = "") -> Check:
             return _check("tts", True, "服務健康（沒有 /v1/models，略過模型檢查）")
         return _check("tts", False, exc.message, exc.hint)
     ids = [str(m.get("id") or m.get("name") or "") for m in models]
+    if models_out is not None:
+        models_out[:] = [i for i in ids if i]
     if not ids:
         return _check("tts", False, "服務健康，但沒有已載入的模型",
                       "先載入模型：audio.cpp 的 WebUI 或 POST /v1/models/load（重啟後要重載）")

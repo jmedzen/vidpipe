@@ -4,7 +4,8 @@
 #   ./tools/compose-up.sh       # = docker compose up -d --build，並帶入兩邊的 build number
 #   → 網頁介面 http://127.0.0.1:8311（要帶 token）
 #
-# 旁白由「主機上」的 audio.cpp 提供（Mac 上跑），容器用 host.docker.internal 連過去。
+# 部署：NAS 上的 Docker 跑 vidgrab + vidpipe（不需要 GPU）；audio.cpp 留在 MacBook Pro 本機（要 GPU），
+# 容器經區網連過去：.env 的 VIDPIPE_TTS_BASE_URL=http://<MacBook 區網 IP>:8301。
 # vidgrab 從 ${VIDGRAB_SRC}（預設 ../vidgrab）建映像；vidpipe 靠內部網路 http://vidgrab:8310 連它。
 name: vidpipe
 
@@ -23,7 +24,7 @@ services:
       JAMENDO_CLIENT_ID: ${JAMENDO_CLIENT_ID:-}
       PEXELS_API_KEY: ${PEXELS_API_KEY:-}
     volumes:
-      - vidgrab-data:/data          # 素材庫、cookie、設定
+      - ${VIDGRAB_DATA_DIR:-vidgrab-data}:/data          # 素材庫、cookie、設定（NAS：填共用資料夾路徑）
     ports:
       # vidgrab 自己的網頁介面（人看素材庫用）；不需要可刪掉。vidpipe 走內部網路，不靠這個。
       - "127.0.0.1:8310:8310"
@@ -45,21 +46,21 @@ services:
       VIDPIPE_ALLOWED_HOSTS: ${VIDPIPE_ALLOWED_HOSTS:-}
       VIDPIPE_VIDGRAB_URL: http://vidgrab:8310
       VIDPIPE_VIDGRAB_TOKEN: ${VIDGRAB_API_TOKEN}
-      VIDPIPE_TTS_BASE_URL: ${VIDPIPE_TTS_BASE_URL:-http://host.docker.internal:8301}
+      VIDPIPE_TTS_BASE_URL: ${VIDPIPE_TTS_BASE_URL:?在 .env 設 VIDPIPE_TTS_BASE_URL（MacBook 的區網位址，例如 http://192.168.1.50:8301）}
       VIDPIPE_TTS_TOKEN: ${VIDPIPE_TTS_TOKEN:-}
       VIDPIPE_TTS_MODEL: ${VIDPIPE_TTS_MODEL:-}
       VIDPIPE_VOICE_REF: ${VIDPIPE_VOICE_REF:-}
       VIDPIPE_REFERENCE_TEXT: ${VIDPIPE_REFERENCE_TEXT:-}
-      VIDPIPE_SUBTITLE_LANGS: ${VIDPIPE_SUBTITLE_LANGS:-zh-TW}
-      VIDPIPE_SUBTITLE_FONT: ${VIDPIPE_SUBTITLE_FONT:-Noto Sans CJK TC}
-    extra_hosts:
-      # Linux 的 Docker Engine 沒有內建 host.docker.internal；Docker Desktop 本來就有，加了也無妨
-      - "host.docker.internal:host-gateway"
+      VIDPIPE_VIDGRAB_PUBLIC_URL: ${VIDPIPE_VIDGRAB_PUBLIC_URL:-}   # 瀏覽器開 vidgrab 用的位址（NAS 的 IP:8310）
+      # 空字串＝沒設：這些項目留給網頁「設定」頁改。寫進 .env 的項目在設定頁會顯示「由環境變數指定」而且鎖住。
+      VIDPIPE_SUBTITLE_LANGS: ${VIDPIPE_SUBTITLE_LANGS:-}
+      VIDPIPE_SUBTITLE_FONT: ${VIDPIPE_SUBTITLE_FONT:-}
     ports:
       - "${VIDPIPE_BIND:-127.0.0.1}:${VIDPIPE_PUBLISH_PORT:-8311}:8320"
     volumes:
-      - vidpipe-work:/data/work     # 中間產物、旁白快取、工作紀錄
-      - vidpipe-out:/data/out       # 成品（要直接拿檔案可改成 ./out:/data/out）
+      - ${VIDPIPE_WORK_DIR:-vidpipe-work}:/data/work     # 中間產物、旁白快取、工作紀錄
+      - ${VIDPIPE_OUT_DIR:-vidpipe-out}:/data/out        # 成品（NAS：填共用資料夾路徑，直接從網路磁碟拿檔案）
+      - vidpipe-config:/data/config   # 網頁「設定」頁存的 vidpipe.json；重建容器後設定還在
     healthcheck:
       test:
         - CMD
@@ -75,3 +76,4 @@ volumes:
   vidgrab-data:
   vidpipe-work:
   vidpipe-out:
+  vidpipe-config:

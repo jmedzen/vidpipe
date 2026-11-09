@@ -11,7 +11,7 @@
 #
 # ffmpeg 是渲染引擎；fonts-noto-cjk 讓燒進影片的中文字幕不會變成方塊。
 # Docker 內連不到主機的 127.0.0.1：vidgrab / audio.cpp 的位址用 VIDPIPE_VIDGRAB_URL、
-# VIDPIPE_TTS_BASE_URL 指到 host.docker.internal 或實際 IP。
+# VIDPIPE_TTS_BASE_URL 指到實際 IP（NAS 部署時 audio.cpp 在 Mac 的區網 IP 上）。
 FROM python:3.12-slim
 
 ARG VIDPIPE_BUILD=dev
@@ -20,7 +20,7 @@ ENV PIP_NO_CACHE_DIR=1 \
     VIDPIPE_BUILD=${VIDPIPE_BUILD} \
     VIDPIPE_WORK_DIR=/data/work \
     VIDPIPE_OUT_DIR=/data/out \
-    VIDPIPE_SUBTITLE_FONT="Noto Sans CJK TC"
+    VIDPIPE_CONFIG=/data/config/vidpipe.json
 
 # fontconfig：ffmpeg 的 subtitles 濾鏡靠它找字體；fonts-noto-cjk 含 Noto Sans CJK TC（繁中）
 RUN apt-get update \
@@ -34,11 +34,11 @@ COPY pyproject.toml README.md ./
 COPY src/ ./src/
 RUN pip install . \
  && useradd -m -u 1000 vidpipe \
- && mkdir -p /data/work /data/out \
+ && mkdir -p /data/work /data/out /data/config \
  && chown -R vidpipe /data
 
 USER vidpipe
-VOLUME ["/data/work", "/data/out"]
+VOLUME ["/data/work", "/data/out", "/data/config"]
 EXPOSE 8320
 ENTRYPOINT ["/usr/bin/tini", "--", "vidpipe"]
 CMD ["version"]

@@ -68,3 +68,22 @@ jobs:
           rc=0; docker run --rm vidpipe:ci serve --host 0.0.0.0 --no-open || rc=$?
           test "$rc" = 2
           docker rm -f vp
+      - name: 設定頁存的設定寫得進 /data/config，權限 600，容器重啟後還在
+        run: |
+          docker run -d --name vp2 -e VIDPIPE_API_TOKEN=ci-token -p 127.0.0.1:8320:8320 \
+            vidpipe:ci serve --host 0.0.0.0 --allow-lan --no-open
+          for i in $(seq 1 30); do curl -fs localhost:8320/api/version && break; sleep 1; done
+          AUTH='Authorization: Bearer ci-token'
+          curl -fs -H "$AUTH" localhost:8320/api/settings -o /tmp/s.json
+          grep -q '"path": "/data/config/vidpipe.json"' /tmp/s.json
+          grep -q '"writable": true' /tmp/s.json
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H "$AUTH" -H 'Content-Type: application/json' \
+            -d '{"changes": {"tts_model": "ci-model", "tts_token": "ci-secret-token"}}' localhost:8320/api/settings)"
+          test "$code" = 200
+          docker exec vp2 sh -c 'test "$(stat -c %a /data/config/vidpipe.json)" = 600 && grep -q ci-model /data/config/vidpipe.json'
+          docker restart vp2
+          for i in $(seq 1 30); do curl -fs localhost:8320/api/version && break; sleep 1; done
+          curl -fs -H "$AUTH" localhost:8320/api/settings -o /tmp/s2.json
+          grep -q '"value": "ci-model"' /tmp/s2.json
+          ! grep -q ci-secret-token /tmp/s2.json
+          docker rm -f vp2

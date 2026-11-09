@@ -20,6 +20,9 @@ vidpipe config          # 目前生效的設定（token 會遮蔽）
 vidpipe doctor          # 檢查 ffmpeg、vidgrab、TTS 是否都就緒
 ```
 
+macOS 可以直接點兩下 `start-vidpipe-8320.command`（仿 audio.cpp 的 `start-server-8301.command`）：
+用 `.venv/bin/vidpipe`（或 PATH 上的 `vidpipe`）在 8320 起網頁並開瀏覽器，字幕字體預設 `PingFang TC`。
+
 ### Docker
 
 完整組合（vidpipe 網頁介面＋vidgrab＋連主機上的 audio.cpp）：
@@ -32,11 +35,16 @@ cp .env.example .env     # 填 VIDPIPE_API_TOKEN、VIDGRAB_API_TOKEN（openssl r
 docker compose exec vidpipe vidpipe doctor     # 檢查 ffmpeg、vidgrab、TTS
 ```
 
-- **旁白**：audio.cpp 跑在主機上（預設 `http://host.docker.internal:8301`，`VIDPIPE_TTS_BASE_URL` 可改）。
-  容器連不到主機的 `127.0.0.1`：Docker Desktop（Mac）用 `host.docker.internal` 連得到只聽 127.0.0.1 的 audio.cpp；Linux Engine 靠 compose 的 `extra_hosts: host-gateway`，而且 audio.cpp 要加 `--host 0.0.0.0`（會對區網開放，注意 `--ui-management`）。
-  `VIDPIPE_VOICE_REF` 是 audio.cpp 那台主機上的路徑，不是容器內的。
+- **部署**：vidgrab 與 vidpipe 跑在 NAS 的 Docker（不需要 GPU）；audio.cpp 留在 MacBook Pro 本機（要 GPU），不進容器。
+  NAS 的容器經區網連它：`.env` 的 `VIDPIPE_TTS_BASE_URL=http://<Mac 的區網 IP>:8301`（Mac 要有固定 IP）。
+  不能用 `localhost`、`host.docker.internal`。`VIDPIPE_VOICE_REF` 是 **Mac 上**的路徑，不是 NAS 或容器內的。
+- **audio.cpp 要改什麼**：它預設只聽 `127.0.0.1`，NAS 連不到。`start-server-8301.command` 要加 `--host <Mac 的 IP>`
+  （綁在區網 IP 比 `0.0.0.0` 好，不會多開到其他介面）。**注意**：這會讓區網內的人連得到它，包含 `--ui-management` 管理介面，
+  我不確定它有沒有密碼。不需要管理介面就拿掉 `--ui-management`；再用 macOS 防火牆只放行 NAS 的 IP 連 8301。
+- **架構**：映像用 Debian 的 python:3.12-slim，amd64 與 arm64 都有；NAS 是 ARM 就直接在 NAS 上 `./tools/compose-up.sh` 建，不用交叉編譯。
 - **字幕字體**：映像有 ffmpeg 與 Noto Sans CJK TC（`VIDPIPE_SUBTITLE_FONT` 預設值），中文字幕不會變方塊。
-- **資料**：`/data/work`（中間產物、旁白快取）與 `/data/out`（成品）各是一個 volume；vidgrab 的素材庫在它自己的 volume。
+- **資料**：`/data/work`（中間產物、旁白快取）、`/data/out`（成品）、`/data/config`（網頁「設定」頁存的 `vidpipe.json`）各是一個 volume，重建容器後都還在；vidgrab 的素材庫在它自己的 volume。NAS 上要放共用資料夾，在 `.env` 設 `VIDGRAB_DATA_DIR`／`VIDPIPE_WORK_DIR`／`VIDPIPE_OUT_DIR`（資料夾要讓 uid 1000 寫得進去）。
+- **設定頁的鎖**：`.env` 裡寫了值的項目（token、TTS 位址、vidgrab 位址等）在設定頁會顯示「由環境變數指定」並鎖住，只能改 `.env` 再重啟；留空的項目（字幕語言、字體等）才能在網頁改並存進 `/data/config`。
 - **build number**：網頁左上角與 `/api/version` 顯示 `commit數.短sha`，每次 commit 都會變，可確認瀏覽器載到的是新版（頁面與靜態檔本來就是 `no-cache`）。Docker 建置沒有 `.git`，所以要用 `tools/compose-up.sh`（或單獨建用 `tools/docker-build.sh`）帶入；直接 `docker compose up --build` 會顯示 `dev`。
 - **安全**：容器以非 root（uid 1000）執行；port 預設只對 `127.0.0.1` 發佈，`VIDPIPE_API_TOKEN` 必填。
 
@@ -47,6 +55,11 @@ docker compose exec vidpipe vidpipe doctor     # 檢查 ffmpeg、vidgrab、TTS
 docker run --rm vidpipe version
 ```
 
+完整組合用本 repo 的 [`docker-compose.yml`](docker-compose.yml)、環境變數範例在 [`.env.example`](.env.example)。
+容器之間用服務名連（`VIDPIPE_VIDGRAB_URL=http://vidgrab:8310`，compose 已設好），
+但瀏覽器看不到那個名字，所以要另外設 `VIDPIPE_VIDGRAB_PUBLIC_URL`（NAS 的 IP 加 8310），
+總覽頁「素材來源 · vidgrab」的「開啟 vidgrab」按鈕才會指到對的地方。
+
 ## 設定
 
 優先序：環境變數 `VIDPIPE_<名稱>` > `vidpipe.json`（或 `VIDPIPE_CONFIG` 指定的檔）> 預設。
@@ -54,6 +67,7 @@ docker run --rm vidpipe version
 | 項目 | 預設 | 說明 |
 |---|---|---|
 | `vidgrab_url` / `vidgrab_token` | `http://127.0.0.1:8310` / 空 | 素材來源 |
+| `vidgrab_public_url` | 空 | **瀏覽器**開 vidgrab 網頁用的位址（總覽頁的「開啟 vidgrab」按鈕）。空 = 從 `vidgrab_url` 推：本機位址原樣用、`host.docker.internal` 改成 `localhost`；compose 服務名（`http://vidgrab:8310`）瀏覽器打不開，推不出來，按鈕會停用並提示你設這項 |
 | `tts_base_url` / `tts_token` | `http://127.0.0.1:8301` / 空 | 旁白（audio.cpp） |
 | `tts_model` | 空 | TTS 模型 id；尚未決定，空 = 伺服器預設 |
 | `tts_concurrency` | `1` | 同時送幾句去合成（1–16）；本機單一模型通常 1 最穩 |
@@ -64,6 +78,11 @@ docker run --rm vidpipe version
 | `normalize_audio` / `target_lufs` | `true` / `-14` | 成片的響度標準化（整合響度 LUFS，-30 到 -5）；TTS 常常偏小聲，開著比較保險 |
 | `work_dir` / `out_dir` | `work` / `out` | 中間產物與成品 |
 | `record_jobs` | `true` | 長指令是否在 `work_dir/_jobs` 留下紀錄（網頁看得到）；關掉就不寫 |
+
+- **空字串的環境變數視為沒設**：docker compose 的 `${VAR:-}` 沒值時會傳空字串，不該因此蓋掉設定檔。
+- **網頁的「設定」頁可以直接改這些項目**（寫回上面那個設定檔，見[網頁介面](#網頁介面)）：被環境變數指定的項目會上鎖，
+  token 存進設定檔是明文（檔案權限 600，`vidpipe.json` 不進版控），有環境變數可用時祕密放環境變數更安全。
+  `VIDPIPE_SETTINGS_READONLY=1` 讓設定頁（與 API）變成唯讀，給「對外開放但不想讓人改設定」的部署。
 
 ## split／speak：分句與逐句旁白
 
@@ -333,7 +352,7 @@ vidpipe serve --port 8080
 下方是最近的工作）、**作品**（每支片做到哪、長度、有幾個素材的授權要確認；點進去有成品播放器、
 每個場景與每句旁白的時間——點句子就跳到那一秒、素材與授權（含可以直接複製的說明欄範本）、檔案、manifest、
 這支片的工作；最近一次失敗會直接講原因）、**工作**（每個長指令的狀態、進度條、階段、參數、結果、
-事件記錄、失敗原因，進行中的可以取消）、**設定**（目前生效的設定，token 遮蔽）。
+事件記錄、失敗原因，進行中的可以取消）、**設定**（見下一段）。
 **不用開終端機也能做一支片**：「作品」頁右上角「＋ 新增作品」→ 貼腳本（空白行隔開場景，`關鍵字：a, b`
 那行是搜素材用的）、取個 id、選填標題與音樂關鍵字 → 按「挑素材」，vidpipe 去 vidgrab 替每個場景挑素材
 （`POST /api/plan`）。「挑素材」分頁列出每個場景選了什麼、為什麼、有哪些備選與提醒；沒問題就按「做成片」
@@ -347,10 +366,25 @@ vidpipe serve --port 8080
 「重新做（套用修改）」——旁白與場景有快取，只有改到的部分會重做。編輯期間別的視窗、agent 或重新挑素材改了
 manifest，儲存會被擋下（`stale_manifest`），不會蓋掉對方。
 
+**設定頁是個完整的編輯介面**：項目依用途分組（素材來源、旁白、字幕、聲音、資料夾），每項依型別用對應的輸入——網址、
+文字、路徑、多行文字、開關、帶範圍與單位的數字（輸入框加步進鈕與滑桿）、選項、token（遮蔽；只能「更換」或「清除」，
+畫面上永遠看不到原本的值）。每項標著值從哪來（**環境變數**＝上鎖、改不了；**設定檔**；**預設**），並附說明；
+存在設定檔的可以「改回預設」。輸入時即時檢查（跟伺服器同一套規則），不合格的項目標紅、不能儲存；沒存的修改有
+「未儲存」標記，離開頁面、關分頁、重新整理前都會先問（Ctrl／⌘ + S 儲存）。儲存是原子寫入、帶 `revision`：
+別的視窗、指令列或人在你編輯時改過設定檔，會被擋下並讓你「載入最新版、保留我的修改」，不會悄悄蓋掉。
+設定檔壞了（不是合法 JSON、有不認得的項目）時頁面仍然打得開，可以「用預設重建」（舊檔先備份成 `.bak`）。
+每一組有**測試連線**，用表單裡還沒儲存的值去測、不改任何設定：vidgrab（連得到嗎、token 對嗎）、TTS（連線、已載入的模型——
+點一下填進「TTS 模型」；「試合成一句」真的請 TTS 合成一句、不留檔，驗證模型與音色參考音檔配不配）、
+ffmpeg 與字體（libass 在不在；**用 libass 真的畫一格字幕、讀它的選字紀錄**，字體裝不到會直接說「改用了 X」，
+不會等到成片裡出現方塊字才發現）、資料夾（可不可寫、剩多少空間，不會建立任何東西）。
+儲存之後下一個請求就用新設定，進行中的工作不受影響。
+
 想先看看畫面又不想動真資料：`python tools/make_fixture.py /tmp/vp-fixture` 會用假 TTS 與合成素材做出四支片
 （做完的、有一個授權要確認的、只有旁白的、渲染失敗的），照它印出的指令 `vidpipe serve` 就能看。
 加 `--serve` 會讓假服務繼續開著並直接開網頁（預設 http://127.0.0.1:8320），「新增作品 → 挑素材 → 做成片
 → 編輯 → 重新做 → 刪除」整條路都能點；`--tts-delay 2` 讓每句旁白多等 2 秒，才看得到進行中的進度條與取消。
+它把假服務的位址寫進 `/tmp/vp-fixture/vidpipe.json`（不用環境變數），所以「設定」頁在這裡改得動、存得下，
+「測試連線」也是綠的。
 
 API（皆為 JSON，錯誤格式同 CLI）：
 
@@ -359,6 +393,9 @@ API（皆為 JSON，錯誤格式同 CLI）：
 | GET | `/api/version` | 版本與 build（公開，給 healthcheck） |
 | GET | `/api/doctor?skip=…` | 等同 `vidpipe doctor` |
 | GET | `/api/config` | 生效設定（祕密遮蔽） |
+| GET | `/api/settings` | 設定頁用：每個項目的分組、型別、說明、範圍、預設、現值與**來源**（`env`／`file`／`default`，`locked`＝被環境變數指定）、設定檔路徑／`revision`／可不可寫，以及設定檔的問題。**祕密沒有值**，只有 `is_set`。設定檔壞掉時照樣回 200（`/api/config` 會回 `bad_config`） |
+| PUT | `/api/settings` | 存設定：`{"changes": {"tts_model": "x", "target_lufs": -16, "tts_token": "…"}, "revision": "…"}`；值 `null`＝改回預設（token＝清掉），沒列的項目不動。不合格回 400 `bad_input`，`error.fields` 是 `{項目: 原因}`，**整批都不會存**；被環境變數指定的項目也是 400；`revision` 不是現在的設定檔回 409 `stale_config`（不給就不檢查）；設定檔壞了回 409，`"replace_invalid": true` 才會覆寫（先備份成 `.bak`）；唯讀部署回 403。回傳同 GET，加 `changed` |
+| POST | `/api/settings/test` | 測試連線：`{"target": "vidgrab"｜"tts"｜"ffmpeg"｜"dirs", "values": {…還沒儲存的草稿…}, "deep": true}`（`deep` 只對 `tts`：真的合成一句）。回 `checks`（跟 doctor 同格式）、`models`（TTS 已載入的）、`elapsed_ms`；不改任何設定。草稿裡 token 沒給＝沿用現有的，空字串＝當作沒有 |
 | GET | `/api/jobs?status=&limit=` | 工作清單（新的在前，最多 200） |
 | GET | `/api/job/{id}[/events]?after=N` | 單一工作與事件（`after` 之後的） |
 | POST | `/api/job/{id}/cancel` | 取消還在跑的工作 |
@@ -435,12 +472,14 @@ claude mcp add --transport http vidpipe http://localhost:8320/mcp \
 | 設了 token | `/api/*`、`/file/*`、`/mcp` 要 `Authorization: Bearer`；瀏覽器開一次 `/?token=…` 換 HttpOnly、SameSite=Strict cookie。外殼、`/static/*`、`/api/version` 公開 |
 | `Host` 標頭 | 只認本機名稱與 IP 字面值（擋 DNS rebinding）；用網域名稱連要放進 `VIDPIPE_ALLOWED_HOSTS`（逗號分隔） |
 | 寫入類請求 | 帶了 `Origin`／`Referer` 就必須跟 `Host` 同源（擋 CSRF）；curl 這類沒帶的放行 |
+| 改設定 | 能改設定的人等於能改 TTS／vidgrab 位址與 work／out 目錄，權限跟 token 一樣大。對外開放又不想讓人改，設 `VIDPIPE_SETTINGS_READONLY=1`（設定頁與 `PUT /api/settings` 唯讀，測試連線也只測現有的設定） |
 
 Docker 裡必須綁 `0.0.0.0`，所以要 `--allow-lan` 與 token；對外範圍由 `-p` 決定，只想本機用就寫 `127.0.0.1:`：
 
 ```bash
 docker run --rm -e VIDPIPE_API_TOKEN="$(openssl rand -hex 24)" -p 127.0.0.1:8320:8320 \
-  -v "$PWD/work:/data/work" -v "$PWD/out:/data/out" vidpipe serve --host 0.0.0.0 --allow-lan --no-open
+  -v "$PWD/work:/data/work" -v "$PWD/out:/data/out" -v "$PWD/config:/data/config" \
+  vidpipe serve --host 0.0.0.0 --allow-lan --no-open
 ```
 
 ### 前端
