@@ -19,6 +19,7 @@ export interface ConfigInfo {
   ok: true
   path: string
   config: Record<string, string | boolean>
+  vidgrab_open: { url: string | null; source: 'public' | 'derived' | 'none'; hint: string }
 }
 
 export interface Check {

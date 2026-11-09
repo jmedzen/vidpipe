@@ -267,7 +267,8 @@ class Handler(BaseHTTPRequestHandler):
             elif route == "/api/config":
                 cfg = config_mod.load()
                 self._json({"ok": True, "path": str(config_mod.config_path()),
-                            "config": cfg.to_dict(mask=True)})
+                            "config": cfg.to_dict(mask=True),
+                            "vidgrab_open": config_mod.vidgrab_open_url(cfg)})
             elif route == "/api/doctor":
                 self._doctor(query)
             elif route == "/api/jobs":
