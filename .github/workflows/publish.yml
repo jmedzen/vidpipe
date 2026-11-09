@@ -1,0 +1,55 @@
+# 把映像發佈到 GitHub Container Registry：ghcr.io/jmedzen/vidpipe
+# 給 NAS（Synology Container Manager）之類不想在本機 build 的環境直接 pull。
+#   push 到 main      → :latest 與 :main 與 :<commit數.短sha>
+#   推 v* tag         → 另加 :<tag>
+#   手動（Actions 頁）→ 同 main，用來第一次發佈或重發
+# 套件預設是私有的；要讓 NAS 免登入 pull，到 GitHub 的 Packages 頁把 vidpipe 設成 Public，
+# 或在 NAS 用有 read:packages 的 token 登入 ghcr.io（見 README）。
+name: publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: build number（commit 數.短 sha，與 compose-up.sh 一致）
+        id: build
+        run: echo "n=$(git rev-list --count HEAD).$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/jmedzen/vidpipe
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=${{ steps.build.outputs.n }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: VIDPIPE_BUILD=${{ steps.build.outputs.n }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

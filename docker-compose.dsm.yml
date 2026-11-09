@@ -1,0 +1,90 @@
+# vidpipe + vidgrab — Synology DSM「Container Manager」專案用，整份貼上就能跑。
+#
+# 用法（DSM 7.2+）：Container Manager → 專案 → 新增 → 來源選「建立 docker-compose.yml」→ 貼上這份。
+#   1. 只需要改標了「★ 要改」的地方（3 個 token／金鑰、TTS 位址）；其餘不用動。
+#   2. 這份檔案不含任何變數替換（美元符號大括號那種）、不需要 .env、不需要 tools/compose-up.sh，也不在 NAS 上 build：
+#      映像從 GitHub Container Registry 直接 pull（ghcr.io/jmedzen/vidgrab、ghcr.io/jmedzen/vidpipe）。
+#      如果 pull 出現 denied／unauthorized：套件還是私有的 → 到 GitHub 把兩個套件設成 Public，
+#      或先在 NAS 的 SSH 用 `docker login ghcr.io`（帳號 jmedzen、密碼用有 read:packages 的 token）。
+#   3. 先建資料夾（專案資料夾下，例如專案放 /volume1/docker/vidpipe）並讓容器的 uid 1000 寫得進去，SSH 執行：
+#        cd /volume1/docker/vidpipe && mkdir -p data/vidgrab data/work data/out data/config
+#        sudo chown -R 1000:1000 data
+#      沒先建的話 Docker 會自己建成 root 的資料夾，容器（uid 1000）寫不進去，會一啟動就報 Permission denied。
+#   4. 啟動後：vidpipe 網頁介面  http://<NAS-IP>:8320   vidgrab 網頁介面  http://<NAS-IP>:8310
+#      兩邊都要輸入 token（就是下面你設的那串）。
+#
+# audio.cpp（旁白 TTS）需要 GPU，不在 NAS 上，留在 MacBook Pro：容器經區網連 TTS 位址。
+# Mac 要有固定 IP，而且 audio.cpp 要聽區網位址（--host <Mac 的 IP>），見 README。
+
+services:
+
+  vidgrab:
+    image: ghcr.io/jmedzen/vidgrab:latest
+    container_name: vidgrab
+    restart: unless-stopped
+    environment:
+      # ★ 要改：vidgrab 的 token，隨便一串長亂碼（SSH 裡 `openssl rand -hex 24` 產生）。
+      #   跟下面 vidpipe 的 VIDPIPE_VIDGRAB_TOKEN 必須是同一串。
+      VIDGRAB_API_TOKEN: "change-me-vidgrab-token"
+      # ★ 要改（沒有的就留空，那個來源會被略過）：素材站金鑰
+      PIXABAY_API_KEY: ""         # 主力來源：https://pixabay.com/api/docs/
+      JAMENDO_CLIENT_ID: ""       # 背景音樂：https://devportal.jamendo.com/
+      PEXELS_API_KEY: ""          # Pexels 暫停新申請，有舊 key 才填
+    ports:
+      - "8310:8310"               # vidgrab 網頁介面（人看素材庫用）；vidpipe 走內部網路，不靠這個
+    volumes:
+      # 素材庫、cookie、設定。相對路徑 = 相對於這個專案的資料夾（建立專案時選的路徑，例如 /volume1/docker/vidpipe）。
+      - ./data/vidgrab:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8310/api/version', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    stop_grace_period: 30s        # 下載大檔需要時間
+
+  vidpipe:
+    image: ghcr.io/jmedzen/vidpipe:latest
+    container_name: vidpipe
+    restart: unless-stopped
+    command: ["serve", "--host", "0.0.0.0", "--allow-lan", "--no-open"]
+    depends_on:
+      vidgrab:
+        condition: service_healthy
+    environment:
+      # ★ 要改：vidpipe 網頁介面／HTTP API 的 token（必填，另一串長亂碼）
+      VIDPIPE_API_TOKEN: "change-me-vidpipe-token"
+
+      # 容器之間用服務名連，不用改。token 要跟上面 vidgrab 的 VIDGRAB_API_TOKEN 同一串。
+      VIDPIPE_VIDGRAB_URL: "http://vidgrab:8310"
+      VIDPIPE_VIDGRAB_TOKEN: "change-me-vidgrab-token"
+
+      # ★ 要改：旁白 TTS = MacBook Pro 上的 audio.cpp（區網 IP:8301）。
+      #   不能寫 localhost／host.docker.internal；Mac 沒開機或 audio.cpp 沒跑時，出旁白那步會失敗。
+      #   寫在這裡，設定頁會顯示「由環境變數指定」並鎖住；想在網頁改就把值清成 ""（空字串 = 沒設）。
+      VIDPIPE_TTS_BASE_URL: "http://192.168.2.66:8301"
+
+      # 以下都是選填，留空 = 在網頁「設定」頁改（存在 ./data/config，重建容器後還在）
+      VIDPIPE_TTS_TOKEN: ""            # audio.cpp 有設密碼才填
+      VIDPIPE_TTS_MODEL: ""
+      VIDPIPE_VOICE_REF: ""            # 音色參考音檔：路徑是「Mac 上」的路徑，不是 NAS 的
+      VIDPIPE_REFERENCE_TEXT: ""
+      VIDPIPE_SUBTITLE_LANGS: ""       # 例如 zh-TW 或 zh-TW,en
+      VIDPIPE_SUBTITLE_FONT: ""        # 映像內建 Noto Sans CJK TC（預設）
+      # 瀏覽器開 vidgrab 用的位址（總覽頁「開啟 vidgrab」按鈕）。留空 = 按鈕停用，
+      # 到網頁「設定」頁填 http://<NAS-IP>:8310 即可；想固定在這裡就直接寫，例如 "http://192.168.2.10:8310"
+      VIDPIPE_VIDGRAB_PUBLIC_URL: ""
+      # 用網域名稱（例如 nas.local）連網頁介面時才需要，逗號分隔；用 IP 連不用填
+      VIDPIPE_ALLOWED_HOSTS: ""
+    ports:
+      - "8320:8320"                    # vidpipe 網頁介面
+    volumes:
+      - ./data/work:/data/work        # 中間產物、旁白快取、工作紀錄
+      - ./data/out:/data/out          # 成品（直接從網路磁碟拿檔案）
+      - ./data/config:/data/config    # 設定頁存的 vidpipe.json
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8320/api/version', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
