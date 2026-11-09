@@ -428,7 +428,7 @@ def test_config_exposes_browser_facing_vidgrab_url(start, monkeypatch, url, publ
 
 
 def test_vidgrab_url_with_credentials_is_refused_without_echoing_them(start, monkeypatch):
-    """網址裡的帳密連不上（http.client 不吃 user:pw@），而且不能被印進錯誤訊息或提示。"""
+    """網址裡不收帳密：設定頁會原樣顯示網址、錯誤訊息也帶網址，祕密不能跟著出現。"""
     monkeypatch.setenv("VIDPIPE_VIDGRAB_URL", "http://user:pw-secret@vidgrab:8310")
     resp = start().get("/api/config")
     assert resp.status_code == 500 and _err(resp)["code"] == "bad_config"
