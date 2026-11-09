@@ -2,14 +2,14 @@
 
 Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 
-- 素材：[vidgrab](https://github.com/jmedzen/vidgrab)（B 站／YouTube／Pexels／Pixabay，帶授權資訊）
+- 素材：[vidgrab](https://github.com/jmedzen/vidgrab)（素材庫：Pixabay／Pexels 免費素材、B 站／YouTube，音樂有 Openverse／Jamendo，都帶授權資訊；Pexels 目前不好申請 API key，主力是 Pixabay）
 - 旁白：audio.cpp 本機 TTS（任何 OpenAI 風格的 `/v1/audio/speech` 都行，例如 ttsgrab）
 - 渲染：ffmpeg（9:16 重構圖、統一編碼、字幕、混音）
 - 給 AI agent 用：CLI（stdout 只有 JSON）、HTTP API、MCP（stdio 與 HTTP 兩種）；
   完整做法見 [docs/agent-recipe.md](docs/agent-recipe.md)
 - 給人看：網頁介面（`vidpipe serve`），看三個服務的狀態、每支片做到哪、預覽成品、進度與工作紀錄
 
-> 狀態：旁白、時間軸、字幕、素材取得、渲染、背景音樂、響度、封面與素材來源清單都能用了（`narrate` → `render` 就得到成片、封面、credits）。目前有 `version`、`config`、`doctor`、`probe`、`normalize`、`trim`、`fill`、`concat`、`serve`、`jobs`／`job`／`cancel`、`split`、`speak`、`validate`、`narrate`、`render`、`make`（一次做完）、`plan`（交給 vidpipe 挑素材）、`cover`、`credits`；HTTP API 也能送件與取成品；`mcp` 讓 Claude Code 之類的 client 直接用。
+> 狀態：整條流水線都能用了：`plan`（挑素材與音樂）→ `narrate`（逐句旁白、時間軸、字幕）→ `render`（9:16 成片、背景音樂 ducking、響度標準化、封面、credits），或 `make` 一次做完；`doctor` 檢查環境。入口有四種：CLI、HTTP API、MCP（stdio 與 HTTP，含 `plan_short`）、網頁介面（`vidpipe serve`：作品頁、編輯場景、換素材、可直接改設定的設定頁、六組主題；macOS 可點兩下 `start-vidpipe-8320.command`）。
 
 ## 快速開始
 
@@ -83,6 +83,8 @@ docker run --rm vidpipe version
 - **網頁的「設定」頁可以直接改這些項目**（寫回上面那個設定檔，見[網頁介面](#網頁介面)）：被環境變數指定的項目會上鎖，
   token 存進設定檔是明文（檔案權限 600，`vidpipe.json` 不進版控），有環境變數可用時祕密放環境變數更安全。
   `VIDPIPE_SETTINGS_READONLY=1` 讓設定頁（與 API）變成唯讀，給「對外開放但不想讓人改設定」的部署。
+- 上表每一項都能用 `VIDPIPE_` 加大寫名稱設定（例如 `VIDPIPE_SUBTITLE_FONT`、`VIDPIPE_TARGET_LUFS`）。
+- 伺服器另外認這幾個（不在設定檔裡）：`VIDPIPE_HOST`、`VIDPIPE_PORT`、`VIDPIPE_API_TOKEN`、`VIDPIPE_NO_AUTH`、`VIDPIPE_ALLOWED_HOSTS`（見[安全](#mcp讓-claude-code-直接用-vidpipe)）。
 
 ## split／speak：分句與逐句旁白
 
@@ -322,7 +324,7 @@ vidpipe credits shorts.json                         # 重做 credits.md
 
 ## 工作紀錄：jobs／job／cancel
 
-`normalize`、`trim`、`fill`、`concat`、`speak`、`narrate`（之後的渲染也一樣）每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
+`normalize`、`trim`、`fill`、`concat`、`speak`、`narrate`、`render`、`make`、`plan`、`cover`、`credits` 每次執行都會在 `work_dir/_jobs/` 留下一份狀態與事件，
 **不管是從終端機、API 還是 MCP 發起的**，網頁的「工作」頁都看得到。輸出的 JSON 多一個 `job`（記錄關掉時是 `null`）。
 
 ```bash
@@ -357,6 +359,7 @@ vidpipe serve --port 8080
 那行是搜素材用的）、取個 id、選填標題與音樂關鍵字 → 按「挑素材」，vidpipe 去 vidgrab 替每個場景挑素材
 （`POST /api/plan`）。「挑素材」分頁列出每個場景選了什麼、為什麼、有哪些備選與提醒；沒問題就按「做成片」
 （`POST /api/make`，旁白、素材、已渲染的場景都走快取，所以失敗後按「重跑」只會補做缺的）。
+**六組主題**（Midnight、Ink、Forest 三深；Paper、Mist、Sakura 三淺，跟 vidgrab 同一套）在側欄的主題選單切換，沒選過就跟著系統深淺色，選擇存在瀏覽器。
 「刪除」會清掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑時不能刪。
 **改一支做好的片**：「場景」分頁的「編輯場景」可以改標題、每個場景的旁白（`text` 或逐句的中英文）、畫面適配（`fit`）、
 素材從第幾秒開始、最短秒數、背景音樂的音量與壓低設定，也能把場景或音樂換素材：「換素材」裡可以直接向 vidgrab 搜尋
