@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from .errors import ConfigError
 
@@ -25,6 +26,9 @@ class Config:
     # vidgrab：素材來源
     vidgrab_url: str = "http://127.0.0.1:8310"
     vidgrab_token: str = ""
+    # 瀏覽器開 vidgrab 網頁用的位址；空 = 從 vidgrab_url 推（見 vidgrab_open_url）。
+    # Docker／NAS：vidgrab_url 常是容器內位址（http://vidgrab:8310），瀏覽器打不開，要在這裡填對外位址。
+    vidgrab_public_url: str = ""
     # audio.cpp（或任何 OpenAI 風格的 /v1/audio/speech，例如 ttsgrab）：旁白
     tts_base_url: str = "http://127.0.0.1:8301"
     tts_token: str = ""
@@ -54,6 +58,54 @@ class Config:
 
 
 _VALID_SUBTITLES = {"zh-TW", "zh-TW+en"}
+
+
+def _web_url(name: str, value: str) -> str:
+    """瀏覽器要開的位址：只收 http(s)、要有主機、不含帳密；回傳去掉結尾斜線的結果。"""
+    parts = urlsplit(value)
+    try:
+        host, _ = parts.hostname, parts.port
+    except ValueError:
+        host = None
+    if parts.scheme not in ("http", "https") or not host or parts.username or parts.password:
+        raise ConfigError(f"{name} 要是 http(s)://主機[:埠] 的網址，"
+                          f"不能含帳號密碼（收到 {value!r}）",
+                          hint="例如 http://192.168.1.10:8310 或 https://vidgrab.example.com")
+    return value.rstrip("/")
+
+
+_LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+
+
+def vidgrab_open_url(cfg: Config) -> dict[str, Any]:
+    """瀏覽器開 vidgrab 網頁的位址。回傳 {url, source, hint}；url 為 None 代表推不出來。
+
+    source：`public`（vidgrab_public_url 明設）、`derived`（從 vidgrab_url 推的）、`none`。
+    推導規則：本機位址原樣用；`host.docker.internal` 當成「主機本人」改成 localhost；
+    沒有點的單一名稱（compose 服務名如 `vidgrab`）瀏覽器解析不到，不猜，叫使用者設 public url。
+    """
+    if cfg.vidgrab_public_url:
+        return {"url": cfg.vidgrab_public_url, "source": "public", "hint": ""}
+    parts = urlsplit(cfg.vidgrab_url)
+    host = (parts.hostname or "").lower()
+    if host == "host.docker.internal":
+        netloc = "localhost" + (f":{parts.port}" if parts.port else "")
+        return {"url": urlunsplit((parts.scheme, netloc, parts.path, "", "")).rstrip("/"),
+                "source": "derived", "hint": ""}
+    internal = host not in _LOOPBACK and "." not in host and ":" not in host
+    if not host or internal or parts.username or parts.password:
+        return {"url": None, "source": "none",
+                "hint": f"vidgrab_url（{_redact(cfg.vidgrab_url)}）是容器內的位址，瀏覽器打不開；"
+                        "設 VIDPIPE_VIDGRAB_PUBLIC_URL 成瀏覽器連得到的網址"}
+    return {"url": urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")).rstrip("/"),
+            "source": "derived", "hint": ""}
+
+
+def _redact(url: str) -> str:
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    netloc = host + (f":{parts.port}" if parts.port else "")
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
 
 
 def config_path() -> Path:
@@ -120,4 +172,8 @@ def load(path: Path | None = None) -> Config:
         raise ConfigError(f"tts_concurrency 要在 1–16（收到 {cfg.tts_concurrency}）")
     cfg.vidgrab_url = cfg.vidgrab_url.rstrip("/")
     cfg.tts_base_url = cfg.tts_base_url.rstrip("/")
+    if cfg.vidgrab_public_url.strip():
+        cfg.vidgrab_public_url = _web_url("vidgrab_public_url", cfg.vidgrab_public_url.strip())
+    else:
+        cfg.vidgrab_public_url = ""
     return cfg

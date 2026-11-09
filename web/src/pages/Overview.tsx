@@ -42,6 +42,29 @@ function tidy(detail: string): string {
   return m ? `${m[1]} ${m[2]}` : detail
 }
 
+/** 開 vidgrab 自己的網頁。連不上或推不出瀏覽器位址時停用，並說明原因。 */
+function OpenVidgrab({ open, check }: { open: ConfigInfo['vidgrab_open'] | undefined; check: Check | undefined }) {
+  if (!open) return null
+  const reason = !open.url
+    ? open.hint
+    : check && !check.ok
+      ? 'vidgrab 目前連不上，先處理左邊的檢查'
+      : ''
+  if (reason) {
+    return (
+      <button type="button" disabled title={reason} aria-describedby="vg-open-hint">
+        開啟 vidgrab ↗<span id="vg-open-hint" className="sr-only">{reason}</span>
+      </button>
+    )
+  }
+  return (
+    <a className="button" href={open.url ?? undefined} target="_blank" rel="noopener noreferrer"
+       title={`在新分頁開啟 ${open.url}`}>
+      開啟 vidgrab ↗<span className="sr-only">（新分頁）</span>
+    </a>
+  )
+}
+
 function CheckRow({ check }: { check: Check }) {
   const level = levelOf(check)
   return (
@@ -132,8 +155,12 @@ export function Overview() {
                   <div>
                     <h3 id={`g-${g.id}`}>{g.title}</h3>
                     <p className="muted small">{g.url ?? g.note}</p>
+                    {g.id === 'vidgrab' && !config.data?.vidgrab_open?.url && config.data?.vidgrab_open?.hint && (
+                      <p className="hint small">{config.data.vidgrab_open.hint}</p>
+                    )}
                   </div>
                   <span className={`level level-${level}`}>{LEVEL_TEXT[level]}</span>
+                  {g.id === 'vidgrab' && <OpenVidgrab open={config.data?.vidgrab_open} check={byName.get('vidgrab')} />}
                 </div>
                 <ul className="checks">{rows.map((c) => <CheckRow key={c.name} check={c} />)}</ul>
               </section>

@@ -20,6 +20,9 @@ vidpipe config          # 目前生效的設定（token 會遮蔽）
 vidpipe doctor          # 檢查 ffmpeg、vidgrab、TTS 是否都就緒
 ```
 
+macOS 可以直接點兩下 `start-vidpipe-8320.command`（仿 audio.cpp 的 `start-server-8301.command`）：
+用 `.venv/bin/vidpipe`（或 PATH 上的 `vidpipe`）在 8320 起網頁並開瀏覽器，字幕字體預設 `PingFang TC`。
+
 ### Docker
 
 ```bash
@@ -31,6 +34,11 @@ docker run --rm vidpipe version
 vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_URL` 指到
 `host.docker.internal` 或實際 IP。
 
+用 compose（vidpipe 與 vidgrab 同一個網路）時，範本在 [`docker-compose.example.yml`](docker-compose.example.yml)、
+環境變數在 [`.env.example`](.env.example)。容器之間用服務名連（`VIDPIPE_VIDGRAB_URL=http://vidgrab:8310`），
+但瀏覽器看不到那個名字，所以要另外設 `VIDPIPE_VIDGRAB_PUBLIC_URL`（NAS 的 IP 或網域加 vidgrab 對外的埠），
+總覽頁「素材來源 · vidgrab」的「開啟 vidgrab」按鈕才會指到對的地方。
+
 ## 設定
 
 優先序：環境變數 `VIDPIPE_<名稱>` > `vidpipe.json`（或 `VIDPIPE_CONFIG` 指定的檔）> 預設。
@@ -38,6 +46,7 @@ vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_
 | 項目 | 預設 | 說明 |
 |---|---|---|
 | `vidgrab_url` / `vidgrab_token` | `http://127.0.0.1:8310` / 空 | 素材來源 |
+| `vidgrab_public_url` | 空 | **瀏覽器**開 vidgrab 網頁用的位址（總覽頁的「開啟 vidgrab」按鈕）。空 = 從 `vidgrab_url` 推：本機位址原樣用、`host.docker.internal` 改成 `localhost`；compose 服務名（`http://vidgrab:8310`）瀏覽器打不開，推不出來，按鈕會停用並提示你設這項 |
 | `tts_base_url` / `tts_token` | `http://127.0.0.1:8301` / 空 | 旁白（audio.cpp） |
 | `tts_model` | 空 | TTS 模型 id；尚未決定，空 = 伺服器預設 |
 | `tts_concurrency` | `1` | 同時送幾句去合成（1–16）；本機單一模型通常 1 最穩 |
