@@ -33,7 +33,7 @@ docker compose exec vidpipe vidpipe doctor     # 檢查 ffmpeg、vidgrab、TTS
 ```
 
 - **旁白**：audio.cpp 跑在主機上（預設 `http://host.docker.internal:8301`，`VIDPIPE_TTS_BASE_URL` 可改）。
-  容器連不到主機的 `127.0.0.1`，所以 audio.cpp 要聽 `0.0.0.0`；Linux 靠 compose 的 `extra_hosts: host-gateway`。
+  容器連不到主機的 `127.0.0.1`：Docker Desktop（Mac）用 `host.docker.internal` 連得到只聽 127.0.0.1 的 audio.cpp；Linux Engine 靠 compose 的 `extra_hosts: host-gateway`，而且 audio.cpp 要加 `--host 0.0.0.0`（會對區網開放，注意 `--ui-management`）。
   `VIDPIPE_VOICE_REF` 是 audio.cpp 那台主機上的路徑，不是容器內的。
 - **字幕字體**：映像有 ffmpeg 與 Noto Sans CJK TC（`VIDPIPE_SUBTITLE_FONT` 預設值），中文字幕不會變方塊。
 - **資料**：`/data/work`（中間產物、旁白快取）與 `/data/out`（成品）各是一個 volume；vidgrab 的素材庫在它自己的 volume。
