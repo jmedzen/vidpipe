@@ -10,7 +10,7 @@
 #        cd /volume1/docker/vidpipe && mkdir -p data/vidgrab data/work data/out data/config
 #        sudo chown -R 1000:1000 data
 #      沒先建的話 Docker 會自己建成 root 的資料夾，容器（uid 1000）寫不進去，會一啟動就報 Permission denied。
-#   4. 啟動後：vidpipe 網頁介面  http://<NAS-IP>:8311   vidgrab 網頁介面  http://<NAS-IP>:8310
+#   4. 啟動後：vidpipe 網頁介面  http://<NAS-IP>:8320   vidgrab 網頁介面  http://<NAS-IP>:8310
 #      兩邊都要輸入 token（就是下面你設的那串）。
 #
 # audio.cpp（旁白 TTS）需要 GPU，不在 NAS 上，留在 MacBook Pro：容器經區網連 TTS 位址。
@@ -77,7 +77,7 @@ services:
       # 用網域名稱（例如 nas.local）連網頁介面時才需要，逗號分隔；用 IP 連不用填
       VIDPIPE_ALLOWED_HOSTS: ""
     ports:
-      - "8311:8320"                    # NAS 的 8311 → 容器內 vidpipe 的 8320
+      - "8320:8320"                    # vidpipe 網頁介面
     volumes:
       - ./data/work:/data/work        # 中間產物、旁白快取、工作紀錄
       - ./data/out:/data/out          # 成品（直接從網路磁碟拿檔案）

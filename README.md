@@ -72,7 +72,7 @@ Container Manager →「專案」→ 新增 →「建立 docker-compose.yml」�
   NAS 才拉得到。
 - **套件預設是私有的**：pull 出現 `denied`／`unauthorized` 時，二選一——到 GitHub 的 Packages 頁把兩個套件設成 Public；
   或在 NAS 的 SSH 先 `sudo docker login ghcr.io -u jmedzen`（密碼貼有 `read:packages` 的 personal access token）。
-- **網址**：vidpipe `http://<NAS-IP>:8311`、vidgrab `http://<NAS-IP>:8310`，都要輸入 token。
+- **網址**：vidpipe `http://<NAS-IP>:8320`、vidgrab `http://<NAS-IP>:8310`，都要輸入 token。
   「開啟 vidgrab」按鈕要到「設定」頁填 `http://<NAS-IP>:8310`（compose 裡留空，才不會被環境變數鎖住）。
 - **資料**用專案資料夾下的相對路徑 bind mount（`./data/vidgrab`、`./data/work`、`./data/out`、`./data/config`），沒有用 Docker volume。
   **先建資料夾並給 uid 1000 寫入權限**（SSH：`cd <專案資料夾> && mkdir -p data/vidgrab data/work data/out data/config && sudo chown -R 1000:1000 data`），
