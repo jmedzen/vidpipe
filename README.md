@@ -25,20 +25,39 @@ macOS 可以直接點兩下 `start-vidpipe-8320.command`（仿 audio.cpp 的 `st
 
 ### Docker
 
+完整組合（vidpipe 網頁介面＋vidgrab＋連主機上的 audio.cpp）：
+
 ```bash
-docker build --build-arg VIDPIPE_BUILD="$(git rev-list --count HEAD).$(git rev-parse --short HEAD)" -t vidpipe .
+git clone https://github.com/jmedzen/vidgrab ../vidgrab    # compose 從這裡建 vidgrab 映像（可用 VIDGRAB_SRC 改位置）
+cp .env.example .env     # 填 VIDPIPE_API_TOKEN、VIDGRAB_API_TOKEN（openssl rand -hex 24）與 PIXABAY_API_KEY 等
+./tools/compose-up.sh                 # = docker compose up -d --build，並帶入兩邊 git 的 build number
+# → http://127.0.0.1:8311（帶 token；vidgrab 在 8310）；docker compose ps 看 healthy
+docker compose exec vidpipe vidpipe doctor     # 檢查 ffmpeg、vidgrab、TTS
+```
+
+- **部署**：vidgrab 與 vidpipe 跑在 NAS 的 Docker（不需要 GPU）；audio.cpp 留在 MacBook Pro 本機（要 GPU），不進容器。
+  NAS 的容器經區網連它：`.env` 的 `VIDPIPE_TTS_BASE_URL=http://<Mac 的區網 IP>:8301`（Mac 要有固定 IP）。
+  不能用 `localhost`、`host.docker.internal`。`VIDPIPE_VOICE_REF` 是 **Mac 上**的路徑，不是 NAS 或容器內的。
+- **audio.cpp 要改什麼**：它預設只聽 `127.0.0.1`，NAS 連不到。`start-server-8301.command` 要加 `--host <Mac 的 IP>`
+  （綁在區網 IP 比 `0.0.0.0` 好，不會多開到其他介面）。**注意**：這會讓區網內的人連得到它，包含 `--ui-management` 管理介面，
+  我不確定它有沒有密碼。不需要管理介面就拿掉 `--ui-management`；再用 macOS 防火牆只放行 NAS 的 IP 連 8301。
+- **架構**：映像用 Debian 的 python:3.12-slim，amd64 與 arm64 都有；NAS 是 ARM 就直接在 NAS 上 `./tools/compose-up.sh` 建，不用交叉編譯。
+- **字幕字體**：映像有 ffmpeg 與 Noto Sans CJK TC（`VIDPIPE_SUBTITLE_FONT` 預設值），中文字幕不會變方塊。
+- **資料**：`/data/work`（中間產物、旁白快取）、`/data/out`（成品）、`/data/config`（網頁「設定」頁存的 `vidpipe.json`）各是一個 volume，重建容器後都還在；vidgrab 的素材庫在它自己的 volume。NAS 上要放共用資料夾，在 `.env` 設 `VIDGRAB_DATA_DIR`／`VIDPIPE_WORK_DIR`／`VIDPIPE_OUT_DIR`（資料夾要讓 uid 1000 寫得進去）。
+- **設定頁的鎖**：`.env` 裡寫了值的項目（token、TTS 位址、vidgrab 位址等）在設定頁會顯示「由環境變數指定」並鎖住，只能改 `.env` 再重啟；留空的項目（字幕語言、字體等）才能在網頁改並存進 `/data/config`。
+- **build number**：網頁左上角與 `/api/version` 顯示 `commit數.短sha`，每次 commit 都會變，可確認瀏覽器載到的是新版（頁面與靜態檔本來就是 `no-cache`）。Docker 建置沒有 `.git`，所以要用 `tools/compose-up.sh`（或單獨建用 `tools/docker-build.sh`）帶入；直接 `docker compose up --build` 會顯示 `dev`。
+- **安全**：容器以非 root（uid 1000）執行；port 預設只對 `127.0.0.1` 發佈，`VIDPIPE_API_TOKEN` 必填。
+
+只跑 vidpipe 一個映像（vidgrab 在別處）：
+
+```bash
+./tools/docker-build.sh                      # 自動帶 build number
 docker run --rm vidpipe version
 ```
 
-映像內有 ffmpeg 與 Noto CJK 字型（燒中文字幕用）。設定檔放在 `/data/config/vidpipe.json`（`VIDPIPE_CONFIG`），
-那是個 volume：想讓網頁設定頁存的設定在容器重建後還在，掛上去（`-v "$PWD/config:/data/config"`，容器裡是 uid 1000 在寫，
-主機的資料夾要讓它寫得進去；掛資料夾，不要掛單一檔案）。容器連不到主機的 `127.0.0.1`，
-vidgrab 與 audio.cpp 的位址要用 `VIDPIPE_VIDGRAB_URL`、`VIDPIPE_TTS_BASE_URL` 指到
-`host.docker.internal` 或實際 IP。
-
-用 compose（vidpipe 與 vidgrab 同一個網路）時，範本在 [`docker-compose.example.yml`](docker-compose.example.yml)、
-環境變數在 [`.env.example`](.env.example)。容器之間用服務名連（`VIDPIPE_VIDGRAB_URL=http://vidgrab:8310`），
-但瀏覽器看不到那個名字，所以要另外設 `VIDPIPE_VIDGRAB_PUBLIC_URL`（NAS 的 IP 或網域加 vidgrab 對外的埠），
+完整組合用本 repo 的 [`docker-compose.yml`](docker-compose.yml)、環境變數範例在 [`.env.example`](.env.example)。
+容器之間用服務名連（`VIDPIPE_VIDGRAB_URL=http://vidgrab:8310`，compose 已設好），
+但瀏覽器看不到那個名字，所以要另外設 `VIDPIPE_VIDGRAB_PUBLIC_URL`（NAS 的 IP 加 8310），
 總覽頁「素材來源 · vidgrab」的「開啟 vidgrab」按鈕才會指到對的地方。
 
 ## 設定

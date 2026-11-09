@@ -10,3 +10,6 @@ vidpipe.json
 tests
 web
 tools
+.env
+.env.*
+!.env.example
