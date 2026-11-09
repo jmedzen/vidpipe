@@ -427,11 +427,19 @@ def test_config_exposes_browser_facing_vidgrab_url(start, monkeypatch, url, publ
         assert "VIDPIPE_VIDGRAB_PUBLIC_URL" in body["vidgrab_open"]["hint"]
 
 
-def test_vidgrab_open_hint_does_not_leak_credentials(start, monkeypatch):
+def test_vidgrab_url_with_credentials_is_refused_without_echoing_them(start, monkeypatch):
+    """網址裡的帳密連不上（http.client 不吃 user:pw@），而且不能被印進錯誤訊息或提示。"""
     monkeypatch.setenv("VIDPIPE_VIDGRAB_URL", "http://user:pw-secret@vidgrab:8310")
     resp = start().get("/api/config")
-    assert resp.json()["vidgrab_open"]["url"] is None
-    assert "pw-secret" not in resp.json()["vidgrab_open"]["hint"]
+    assert resp.status_code == 500 and _err(resp)["code"] == "bad_config"
+    assert "pw-secret" not in resp.text
+
+
+def test_vidgrab_open_hint_redacts_credentials_even_if_the_config_is_built_by_hand():
+    from vidpipe.config import Config, vidgrab_open_url
+
+    out = vidgrab_open_url(Config(vidgrab_url="http://user:pw-secret@vidgrab:8310"))
+    assert out["url"] is None and "pw-secret" not in out["hint"]
 
 
 @pytest.mark.parametrize("bad", ["vidgrab:8310", "ftp://x:1", "http://u:p@h:1", "http://"])

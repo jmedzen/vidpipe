@@ -67,6 +67,10 @@ class FakeVidgrab:
     # -- HTTP ---------------------------------------------------------
     def handle(self, method, path, headers, body):
         self.headers.append(headers)
+        if path == "/api/version":                 # 設定頁的「測試連線」與 doctor 會問
+            return 200, {"full": "fake"}
+        if path == "/api/projects":
+            return 200, []
         if path.startswith("/api/find/"):
             needle = urllib.parse.unquote(path[len("/api/find/"):])
             asset_id = needle.split("#")[0]

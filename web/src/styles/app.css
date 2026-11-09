@@ -466,3 +466,112 @@ button.add { justify-self: start; }
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
   clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
+
+/* ---------------------------------------------------------- 設定頁
+   每個項目一列：標籤＋來源在上、輸入在中、說明與錯誤在下。左邊一條線表示狀態
+   （改過還沒存＝accent、不合格＝紅）。顏色都用主題變數，六個主題共用。 */
+/* 黏在上面的儲存列會蓋住 Tab 到的欄位：捲動時留出它的高度 */
+main { scroll-padding-top: 88px; }
+.settings-bar { border-color: var(--line); }
+.settings-bar.dirty { border-color: var(--accent); }
+.bar-note { margin: -4px 0 12px; }
+.setting-group .card-head { margin-bottom: 2px; }
+.setting-group .card-head + .setting { border-top: 0; }
+.setting { position: relative; display: grid; gap: 7px; padding: 14px 0 14px 14px; border-top: 1px solid var(--line); }
+.setting::before {
+  content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 3px;
+  background: transparent; transition: background .15s;
+}
+.setting.dirty::before { background: var(--accent); }
+.setting.invalid::before { background: var(--bad); }
+.setting-head { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
+.setting-label { font-weight: 600; }
+.setting-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.control { display: grid; gap: 8px; min-width: 0; }
+.setting .help { margin: 0; }
+.setting.idle .control, .setting.idle .help { opacity: .6; }
+.idle-note { color: var(--warn-text); }
+input.mono, textarea.mono { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+input[readonly], textarea[readonly], input:disabled, textarea:disabled { opacity: .75; cursor: not-allowed; background: var(--panel2); }
+.setting.locked .control { opacity: .9; }
+.setting.frozen .control { opacity: .75; }
+.lock-note { margin: 0; padding-left: 10px; color: var(--muted-text); border-left: 2px solid color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.pending { margin: 0; color: var(--warn-text); }
+button.link {
+  display: inline; background: none; border: 0; padding: 0 2px; font: inherit; font-size: 12.5px;
+  color: var(--accent-text); text-decoration: underline; cursor: pointer; border-radius: 4px;
+}
+button.link:hover:not(:disabled) { color: var(--text); border-color: transparent; }
+.pending button.link { margin-left: 8px; }
+
+.switch { display: inline-flex; align-items: center; gap: 10px; background: none; border: 0; padding: 2px 0; justify-self: start; cursor: pointer; }
+.switch:hover:not(:disabled) { border-color: transparent; }
+.switch:disabled { cursor: not-allowed; }
+.switch-track {
+  position: relative; flex: none; width: 44px; height: 24px; border-radius: 999px;
+  background: var(--panel2); border: 1px solid var(--muted-text); transition: background .15s, border-color .15s;
+}
+.switch-thumb {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--muted-text); transition: transform .15s, background .15s;
+}
+.switch[aria-checked="true"] .switch-track { background: color-mix(in srgb, var(--accent) 80%, var(--text)); border-color: transparent; }
+.switch[aria-checked="true"] .switch-thumb { transform: translateX(20px); background: var(--on-accent); }
+.switch-text { min-width: 1.5em; color: var(--muted-text); }
+.switch[aria-checked="true"] .switch-text { color: var(--text); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .switch-track, .switch-thumb { transition: none; } }
+
+.num-control { display: grid; gap: 10px; }
+.num-row { display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap; }
+.stepper { display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--code-bg); }
+.stepper:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.stepper input[type="number"] {
+  width: 6.5em; text-align: center; border: 0; border-radius: 0; background: transparent;
+  font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield;
+}
+.stepper input[type="number"]:focus-visible { outline: none; }
+.stepper input[type="number"]::-webkit-inner-spin-button, .stepper input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper button { width: 38px; padding: 0; border: 0; border-radius: 0; background: var(--panel2); font-size: 16px; line-height: 1; }
+.stepper button:hover:not(:disabled) { background: var(--accent-soft); border-color: transparent; }
+.stepper input:disabled, .stepper input[readonly] { background: transparent; }
+.unit { color: var(--muted-text); }
+.slider { width: 100%; max-width: 420px; accent-color: var(--accent); }
+
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--code-bg); justify-self: start; }
+.seg { position: relative; padding: 5px 16px; border-radius: 7px; color: var(--muted-text); cursor: pointer; user-select: none; }
+.seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.seg:hover { color: var(--text); }
+.seg.on { color: var(--text); font-weight: 600; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.seg:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.choice { display: grid; gap: 6px; }
+.choice p { margin: 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 1px 11px; border-radius: 999px; font-size: 12.5px; background: var(--panel2); color: var(--muted-text); }
+.chip[aria-pressed="true"] { color: var(--text); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+.secret { display: grid; gap: 6px; }
+.secret p { margin: 0; }
+.secret-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 34px; }
+.dots { letter-spacing: 2px; color: var(--muted-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.test-area { display: grid; gap: 10px; margin-top: 6px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.test-actions { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+.test-result { padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.test-result.stale .checks, .test-result.stale .models { opacity: .55; }
+.test-summary { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.stale-note { color: var(--warn-text); }
+.models { display: grid; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.models p { margin: 0; }
+.docker-help { margin-top: 12px; }
+.docker-help summary { cursor: pointer; color: var(--accent-text); }
+.docker-help[open] summary { margin-bottom: 6px; }
+.docker-help pre.json { margin-top: 8px; }
+.ok-text { color: var(--ok-text); }
+
+@media (max-width: 820px) {
+  .settings-bar > div { flex-basis: 100%; }
+  .settings-bar button { flex: 1; }
+}
+/* muted 段落裡的 code：Mist 的 --muted 放在 code 底色上只有 4.2:1 */
+.muted code { color: var(--muted-text); }

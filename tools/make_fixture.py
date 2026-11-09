@@ -10,7 +10,8 @@
 造出四支片：做完的、做完但有一個素材授權要確認的、只有旁白的、渲染失敗的。需要 ffmpeg。
 
 加 `--serve` 會在造完之後讓假 TTS 與假 vidgrab 繼續開著，並直接開網頁伺服器：網頁上「新增作品」→
-挑素材 → 做成片 → 刪除，整條路都能點，不需要任何真的服務。
+挑素材 → 做成片 → 刪除，整條路都能點，不需要任何真的服務。位址與字體寫在 `<dir>/vidpipe.json`
+（不用環境變數），所以「設定」頁改得動、存得下，「測試連線」也是綠的。
 
     python tools/make_fixture.py /tmp/vp-fixture --serve          # http://127.0.0.1:8320
 """
@@ -123,12 +124,16 @@ def main() -> int:
         return found
 
     vg.search_handler = search
-    os.environ.update({
-        "VIDPIPE_TTS_BASE_URL": tts.url, "VIDPIPE_VIDGRAB_URL": vg_server.url,
-        "VIDPIPE_WORK_DIR": str(root / "work"), "VIDPIPE_OUT_DIR": str(root / "out"),
-    })
+    # 位址與字體寫進設定檔、不用環境變數：網頁的「設定」頁才改得動、存得下，測試連線也是綠的
+    for name in [n for n in os.environ if n.startswith("VIDPIPE_")]:
+        del os.environ[name]
+    settings = {"tts_base_url": tts.url, "vidgrab_url": vg_server.url,
+                "work_dir": str(root / "work"), "out_dir": str(root / "out")}
     if has_cjk_font():
-        os.environ["VIDPIPE_SUBTITLE_FONT"] = font_name()
+        settings["subtitle_font"] = font_name()
+    config_file = root / "vidpipe.json"
+    config_file.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.environ["VIDPIPE_CONFIG"] = str(config_file)
     burn = has_cjk_font()
 
     paragraphs = SCRIPT.read_text(encoding="utf-8").strip().split("\n\n")
@@ -175,6 +180,7 @@ def main() -> int:
         return serve(args.serve, root)
     tts.close()
     vg_server.close()
+    config_file.unlink()                      # 假服務關了，裡面的位址已經是死的
     print(json.dumps({"ok": True, "work_dir": str(root / "work"), "out_dir": str(root / "out"),
                       "shorts": ["taipei-night-01", "old-bookstore-02", "late-walk-03",
                                  "broken-04"],

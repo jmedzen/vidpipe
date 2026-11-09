@@ -17,7 +17,8 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     VIDPIPE_BUILD=${VIDPIPE_BUILD} \
     VIDPIPE_WORK_DIR=/data/work \
-    VIDPIPE_OUT_DIR=/data/out
+    VIDPIPE_OUT_DIR=/data/out \
+    VIDPIPE_CONFIG=/data/config/vidpipe.json
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
@@ -28,11 +29,11 @@ COPY pyproject.toml README.md ./
 COPY src/ ./src/
 RUN pip install . \
  && useradd -m -u 1000 vidpipe \
- && mkdir -p /data/work /data/out \
+ && mkdir -p /data/work /data/out /data/config \
  && chown -R vidpipe /data
 
 USER vidpipe
-VOLUME ["/data/work", "/data/out"]
+VOLUME ["/data/work", "/data/out", "/data/config"]
 EXPOSE 8320
 ENTRYPOINT ["vidpipe"]
 CMD ["version"]

@@ -41,6 +41,19 @@ class BadInput(VidpipeError):
     code = "bad_input"
 
 
+class FieldErrors(BadInput):
+    """表單有幾個欄位不合格：`fields` 是 {欄位: 原因}，網頁據此標在對應的欄位上。"""
+
+    def __init__(self, message: str, fields: dict[str, str], *, hint: str | None = None):
+        super().__init__(message, hint=hint)
+        self.fields = dict(fields)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = super().to_dict()
+        data["error"]["fields"] = dict(self.fields)
+        return data
+
+
 class NotFound(VidpipeError):
     code = "not_found"
 

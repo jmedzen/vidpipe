@@ -40,6 +40,10 @@ class FakeTTS:
         fake_server.handler = self.handle
 
     def handle(self, method, path, headers, body):
+        if path == "/health":                      # 設定頁的「測試連線」與 doctor 會問
+            return 200, {"status": "ok"}
+        if path == "/v1/models":
+            return 200, {"data": [{"id": "fake-tts"}]}
         if path != "/v1/audio/speech":
             return 404, {"error": "no route"}
         req = json.loads(body)
