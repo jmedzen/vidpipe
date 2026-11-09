@@ -224,10 +224,23 @@ def test_subtitle_font_config_validation(monkeypatch):
     assert config_mod.load().subtitle_font == "Noto Sans CJK TC"
     monkeypatch.setenv("VIDPIPE_SUBTITLE_FONT", "PingFang TC")
     assert config_mod.load().subtitle_font == "PingFang TC"
-    for bad in ("", "A,B", "  "):
+    for bad in ("A,B", "  "):
         monkeypatch.setenv("VIDPIPE_SUBTITLE_FONT", bad)
         with pytest.raises(ConfigError):
             config_mod.load()
+    # 空字串的環境變數視為沒設（docker-compose 的 ${VAR:-} 會傳空字串），不是錯誤
+    monkeypatch.setenv("VIDPIPE_SUBTITLE_FONT", "")
+    assert config_mod.load().subtitle_font == "Noto Sans CJK TC"
+
+
+def test_empty_subtitle_font_in_the_config_file_is_rejected(tmp_path, monkeypatch):
+    from vidpipe import config as config_mod
+
+    file = tmp_path / "vidpipe.json"
+    file.write_text('{"subtitle_font": ""}', encoding="utf-8")
+    monkeypatch.setenv("VIDPIPE_CONFIG", str(file))
+    with pytest.raises(ConfigError):
+        config_mod.load()
 
 
 # ------------------------------------------------------------------ narrate 一併產生

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Sidebar } from './components/Sidebar'
 import type { NavItem } from './components/Sidebar'
 import { useApi } from './lib/api'
+import { leaveGuard } from './lib/leaveGuard'
 import { applyTheme, initialTheme } from './lib/theme'
 import { JobDetailPage, JobsPage } from './pages/Jobs'
 import { NewShortPage } from './pages/NewShort'
@@ -51,7 +52,16 @@ export default function App() {
   const version = useApi<VersionInfo>('/api/version')
 
   useEffect(() => {
-    const onHash = () => setRoute(routeFromHash())
+    const onHash = () => {
+      const next = routeFromHash()
+      // 設定頁有沒儲存的修改：先不換頁，把網址拉回來，由設定頁問使用者
+      if (leaveGuard.isDirty() && next.page !== 'settings') {
+        leaveGuard.block(window.location.hash)
+        window.history.replaceState(null, '', '#/settings')
+        return
+      }
+      setRoute(next)
+    }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])

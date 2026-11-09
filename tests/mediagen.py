@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import re
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -117,7 +118,8 @@ def has_cjk_font() -> bool:
 
 def font_name() -> str:
     out = subprocess.run(["fc-list", ":lang=zh", "family"], capture_output=True, text=True).stdout
-    return out.splitlines()[0].split(",")[0].strip()
+    first = out.splitlines()[0].split(",")[0].strip()
+    return re.sub(r"\\(.)", r"\1", first)       # fc-list 把 `-` 寫成 `\-`
 
 
 def bright_rows(video, at: float, width: int, height: int) -> list[int]:

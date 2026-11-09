@@ -5,6 +5,8 @@ export interface ApiErrorBody {
   hint: string
   upstream?: string
   upstream_code?: string
+  /** 表單有欄位不合格時，每個欄位一句原因（設定頁標在對應的欄位上）。 */
+  fields?: Record<string, string>
 }
 
 export interface VersionInfo {
@@ -306,4 +308,90 @@ export interface ShortDetail extends ShortSummary {
 export interface ShortDetailResponse {
   ok: true
   short: ShortDetail
+}
+
+// ---------------------------------------------------------------- 設定頁
+
+export type SettingKind = 'url' | 'text' | 'path' | 'textarea' | 'secret' | 'bool' | 'int' | 'float' | 'choice'
+export type SettingSource = 'env' | 'file' | 'default'
+export type SettingScalar = string | number | boolean
+
+export interface SettingChoice {
+  value: string
+  label: string
+  hint: string
+}
+
+export interface SettingField {
+  name: string
+  group: string
+  kind: SettingKind
+  label: string
+  help: string
+  placeholder: string
+  unit: string
+  min: number | null
+  max: number | null
+  step: number | null
+  range_hint: string
+  choices: SettingChoice[]
+  suggestions: string[]
+  /** 另一個項目「有值」這個才用得到。 */
+  depends_on: string
+  required: boolean
+  forbidden: string
+  forbidden_label: string
+  default: SettingScalar
+  env_var: string
+  source: SettingSource
+  /** 被環境變數指定：網頁改不了。 */
+  locked: boolean
+  in_file: boolean
+  /** 現在這個值不合格（例如環境變數亂填），帶原因。 */
+  problem: string
+  /** 祕密一律是 null；只有 `is_set` 說明有沒有設。 */
+  value: SettingScalar | null
+  /** 設定檔裡存的值（可能被環境變數蓋住）；祕密沒有。 */
+  file_value: SettingScalar | null
+  is_set: boolean | null
+}
+
+export interface SettingGroup {
+  id: string
+  title: string
+  note: string
+}
+
+export interface SettingProblem {
+  code: 'file_invalid' | 'unknown_keys'
+  message: string
+  hint: string
+  keys?: string[]
+}
+
+export interface SettingsInfo {
+  ok: true
+  path: string
+  path_from_env: boolean
+  exists: boolean
+  revision: string
+  writable: boolean
+  readonly: boolean
+  write_problem: string
+  problems: SettingProblem[]
+  load_error: string
+  groups: SettingGroup[]
+  fields: SettingField[]
+}
+
+export interface SettingsSaved extends SettingsInfo {
+  changed: string[]
+}
+
+export interface SettingsTest {
+  ok: true
+  target: 'vidgrab' | 'tts' | 'ffmpeg' | 'dirs'
+  checks: Check[]
+  models: string[]
+  elapsed_ms: number
 }

@@ -17,4 +17,5 @@ services:
     volumes:
       - ./work:/data/work
       - ./out:/data/out
+      - ./config:/data/config  # 網頁「設定」頁存的 vidpipe.json；掛目錄（不是單一檔），容器裡是 uid 1000 在寫
     command: ["serve", "--host", "0.0.0.0", "--allow-lan", "--no-open"]
