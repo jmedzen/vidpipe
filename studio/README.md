@@ -68,7 +68,7 @@ cd studio
 - **腳本**:`prompts/script.md`。產出 hook 備選、常駐標題、場景(每景一個畫面主題)、金句、小練習、出處。
 - **規則檢查**(`pipeline/textcheck.py`,不靠 LLM):總字數、句長 20 字、禁用的開場與用語、簡體字、出處與標題。
 - **審稿**:`prompts/review.md`,由另一個獨立的 LLM 呼叫執行。硬性問題或任何一項低於 4 分就退回重寫;
-  通過但意見超過兩條會再磨一輪;改到最後一輪仍有佛法疑義就停下來交給人(`DOUBTS.json`)。
+  第一版通過但意見超過兩條會多磨一輪;改到最後一輪仍有佛法疑義就停下來交給人(`DOUBTS.json`)。
 - **挑素材**(`pipeline/footage.py`、`assets/footage.json`):每個畫面主題維護一個 vidgrab 素材池。授權明確的優先,
   同一支片盡量不重複,相鄰鏡頭不用同一段。場景依句子切成「鏡頭」,約 4 到 6 秒換一次畫面。
 - **成片**:組出 manifest(常駐標題與系列名稱用 `overlays`、配樂、`fit: crop`),呼叫 `vidpipe validate` 與 `vidpipe make`。

@@ -139,8 +139,8 @@ class Run:
                 passed = bool(review.get("pass")) and not doubts and \
                     all(isinstance(v, (int, float)) and v >= 4 for v in scores.values()) and \
                     not any(i.get("severity") == "hard" for i in issues)
-                # 通過但還有不少可改之處:再磨一輪(最後一輪就收下)
-                polish = passed and len(issues) > 2 and n < rounds
+                # 第一版通過但還有不少可改之處:只多磨一輪(審稿人每次都挑得出小毛病,不能無限磨)
+                polish = passed and len(issues) > 2 and n == 1 and rounds > 1
                 self.log(f"審稿第 {n} 輪:{'通過' if passed else '不通過'}"
                          f"{'(再磨一輪)' if polish else ''} {scores},{len(issues)} 個意見")
                 if passed and not polish:
