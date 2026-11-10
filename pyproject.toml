@@ -30,7 +30,7 @@ where = ["src"]
 
 # 前端產物要一起打包，否則 pip／Docker 裝完之後 /static/* 會 404
 [tool.setuptools.package-data]
-vidpipe = ["static/*", "static/assets/*"]
+vidpipe = ["static/*", "static/assets/*", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "studio/tests"]

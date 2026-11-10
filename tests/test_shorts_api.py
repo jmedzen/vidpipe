@@ -254,3 +254,67 @@ def test_parse_range_handles_the_single_range_forms():
     for bad in ("bytes=100-", "bytes=9-3", "bytes=-", "bytes=-0", "bytes=1-2,5-6", "x", ""):
         assert parse(bad, 100) is None, bad
     assert parse("bytes=0-0", 0) is None
+
+
+# ------------------------------------------------------------------ 文案直出（/api/quick）
+
+QUICK_TEXT = "為什麼越想放下，反而越放不下？\n\n今晚念頭又來，就在心裡說一聲，我看到了。"
+
+
+@pytest.fixture
+def stock(env, second_server, monkeypatch):
+    """假 vidgrab：每次搜尋回一支新的 60 秒素材。"""
+    from mediagen import make
+    from vgfake import FakeVidgrab
+
+    footage = make(env / "footage.mp4", "color=c=teal:s=540x960", audio=True, seconds=60,
+                   fps=25).read_bytes()
+    vg = FakeVidgrab(second_server, footage)
+
+    def search(body):
+        found = [FakeVidgrab.candidate(f"youtube:{len(vg.searches)}", duration=60,
+                                       kind="free-attribution")]
+        vg.items[found[0]["id"]] = found[0]
+        return found
+
+    vg.search_handler = search
+    monkeypatch.setenv("VIDPIPE_VIDGRAB_URL", second_server.url)
+    return vg
+
+
+def test_quick_preview_shows_the_storyboard_without_touching_the_network(api, env):
+    run = api()
+    body = run.post("/api/quick/preview", json={"text": QUICK_TEXT, "id": "p1"}).json()
+    assert body["ok"] and body["title"] == "為什麼越想放下，反而越放不下？"
+    assert [b["id"] for b in body["beats"]] == ["s1-1", "s2-1"] and "sky" in body["themes"]
+    assert body["estimated_seconds"] > 5 and not (env / "work").exists()
+    bad = run.post("/api/quick/preview", json={"text": "好", "nope": 1})
+    assert bad.status_code == 400 and "nope" in bad.json()["error"]["message"]
+
+
+def test_quick_makes_a_short_from_plain_text_as_one_job(api, env, stock):
+    run = api()
+    resp = run.post("/api/quick", json={"text": QUICK_TEXT, "id": "q1", "music": False,
+                                        "series": "一分鐘"})
+    assert resp.status_code == 202 and resp.json()["op"] == "quick"
+    job = wait_job(run, resp.json()["job"])
+    assert job["status"] == "succeeded", job
+    short = run.get("/api/short/q1").json()["short"]
+    assert any(f["name"] == "q1.mp4" for f in short["files"])
+    assert short["manifest"]["overlays"][0]["text"] == "為什麼越想放下，反而越放不下？"
+    rejected = run.post("/api/quick", json={"text": ""})
+    assert rejected.status_code == 400 and not (env / "work" / "shorts" / "None").exists()
+
+
+def test_quick_batch_takes_csv_text_and_runs_the_items_in_one_job(api, env, stock):
+    run = api()
+    csv_text = 'id,text\nc-1,"今天很好。"\nc-2,"明天也好。"\n'
+    resp = run.post("/api/quick", json={"batch": csv_text, "format": "csv", "music": False})
+    assert resp.status_code == 202 and resp.json()["ids"] == ["c-1", "c-2"]
+    job = wait_job(run, resp.json()["job"], timeout=240)
+    assert job["status"] == "succeeded" and job["kind"] == "quick-batch", job
+    names = {s["id"] for s in run.get("/api/shorts").json()["shorts"]}
+    assert {"c-1", "c-2"} <= names
+    assert (env / "out" / "c-1.mp4").is_file() and (env / "out" / "c-2.mp4").is_file()
+    bad = run.post("/api/quick", json={"items": [{"text": "一。"}, {"text": "一。"}]})
+    assert bad.status_code == 400 and "重複" in bad.json()["error"]["message"]

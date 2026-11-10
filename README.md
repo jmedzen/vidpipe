@@ -226,6 +226,29 @@ vidpipe narrate shorts.json    # 逐句合成旁白 → 排時間軸 → 寫 wor
 - 字體用設定的 `subtitle_font`。**字體裝不到時 libass 會換成別的字體，中文可能變方塊**——Docker 映像已裝 Noto CJK；
   Mac 請把 `VIDPIPE_SUBTITLE_FONT` 設成裝得到的繁中字體（例如 `PingFang TC`）。
 
+## quick：文案直出（不需要 LLM）
+
+只有一段文案，想直接變成一支 Short：
+
+```bash
+vidpipe quick 文案.txt --title "為什麼越想放下，反而越放不下？" --series "一分鐘佛法"
+vidpipe quick --text "今天很好。明天也好。" --dry-run     # 只看分鏡與挑到的素材，不做成片
+vidpipe quick batch.csv                                    # 批次：CSV（要有 text 欄）、JSON 清單、JSONL
+```
+
+- **分鏡**：空白行隔開的每一段是一個場景，再依句子切成鏡頭（每段不超過 26 個字），大約 4 到 6 秒換一次畫面。
+- **畫面**：旁白裡出現主題的關鍵詞就選那個主題（30 個主題與關鍵詞在 `src/vidpipe/data/footage.json`），都沒對到就輪流用
+  安靜的空鏡。想自己指定，在段落裡加一行 `畫面：ocean`。
+- **素材不重複**：每個主題向 vidgrab 搜 YouTube 上標示可免費使用的空鏡，授權明確的優先。**別的作品用過的素材不會再用**
+  （記在 `work_dir/_quick/used.json`）；沒用過的不夠就換一組關鍵字再搜，真的沒有才重複使用並在 `warnings` 說。
+  `--only-clear-license` 只用授權明確的（預設也放行授權未標示的，`credits.md` 會標出來）。
+- **版面**：上方加大的黃色常駐標題（`--title`，不給就用第一句）、下方系列名稱（`--series`）、加大的字幕、
+  vidgrab 音樂庫的背景音樂（`--no-music` 關掉）。
+- **批次**的每一筆欄位：`text`（必填）、`id`、`title`、`series`、`music`、`allow_unknown_license`、`subtitle_size`、`aspect`。
+  一個工作、一支接一支做；一支失敗不影響其他支，結果逐筆列出。
+- HTTP：`POST /api/quick`，本體是單筆（`{"text": …}`）、`{"items": [...]}`，或 `{"batch": "<CSV 或 JSON 文字>", "format": "csv"}`；
+  回 202 與 `job`。`POST /api/quick/preview` 只回分鏡（不連網、不開工作）。網頁的「文案直出」頁用的就是這兩個。
+
 ## plan：交給 vidpipe 挑素材
 
 腳本寫好、還沒挑素材時用。**草稿就是 manifest**，只是場景可以用 `query`（搜尋關鍵字）代替 `clip`，

@@ -483,6 +483,62 @@ def delete(cfg: Config, short_id: str) -> dict[str, Any]:
     return {"short_id": short_id, "deleted": True, "removed": removed}
 
 
+def _spawn(cfg: Config, cmd: list[str]) -> str:
+    """開子行程跑一個會留下工作紀錄的 vidpipe 指令，回它的 job id。"""
+    env = {**os.environ, "VIDPIPE_RECORD_JOBS": "true"}   # 沒有紀錄就沒有 job 可看
+    with tempfile.TemporaryFile() as errfile:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=errfile, env=env, start_new_session=True)
+        threading.Thread(target=proc.wait, daemon=True).start()   # 收屍，免得留 zombie
+        return _wait_for_job(cfg, proc, errfile)
+
+
+QUICK_SHARED = ("series", "music", "allow_unknown_license", "subtitle_size", "aspect")
+
+
+def quick_preview(body: dict[str, Any]) -> dict[str, Any]:
+    """文案直出的分鏡預覽：不連網、不開工作。回每個鏡頭的文字與畫面主題、粗估秒數。"""
+    from . import quick
+
+    req = quick.parse_request(body)
+    beats = quick.storyboard(req["text"])
+    return {"id": req["id"], "title": req["title"], "chars": quick.chars(req["text"]),
+            "estimated_seconds": round(quick.chars(req["text"]) / 4.2 + len(beats) * 0.4, 1),
+            "beats": beats, "themes": list(quick.library()["themes"])}
+
+
+def launch_quick(cfg: Config, body: dict[str, Any]) -> dict[str, Any]:
+    """文案直出：單筆（`text`…）或批次（`items` 清單，或 `batch` 原始文字加 `format`）→ 開工作。
+
+    批次是一個工作、一支接一支做（TTS 一次只合成一支片最穩）；`series`、`music` 等寫在最上層的
+    選項套用到每一筆（各筆自己寫的優先）。
+    """
+    from . import quick
+
+    shared = {k: body[k] for k in QUICK_SHARED if k in body}
+    if "items" in body or "batch" in body:
+        raw = body["items"] if "items" in body else body["batch"]
+        fmt = body.get("format") or ""
+        if not isinstance(fmt, str):
+            raise BadInput("format 要是字串（json、jsonl、csv）")
+        reqs = quick.parse_batch(raw, fmt=fmt, shared=shared)
+        for req in reqs:
+            _assert_idle(cfg, req["id"])
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+        path = Path(cfg.work_dir) / "_quick" / "batches" / f"{stamp}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        timeline._atomic_json(path, {"items": reqs})
+        job_id = _spawn(cfg, [sys.executable, "-m", "vidpipe", "quick", str(path)])
+        return {"op": "quick-batch", "job": job_id, "status_url": f"/api/job/{job_id}",
+                "ids": [r["id"] for r in reqs]}
+    req = quick.parse_request(body)
+    _assert_idle(cfg, req["id"])
+    path = quick.store_request(cfg, req)
+    job_id = _spawn(cfg, [sys.executable, "-m", "vidpipe", "quick", str(path)])
+    return {"short_id": req["id"], "op": "quick", "job": job_id,
+            "status_url": f"/api/job/{job_id}"}
+
+
 def launch(cfg: Config, op: str, doc: Any, *, at: float | None = None,
            text: str | None = None) -> dict[str, Any]:
     """驗證 manifest、存進作品資料夾、開子行程跑 `vidpipe <op>`，回 job id（工作在背景跑）。
@@ -504,10 +560,5 @@ def launch(cfg: Config, op: str, doc: Any, *, at: float | None = None,
             cmd += ["--at", repr(float(at))]
         if text is not None:
             cmd += ["--text", text]
-    env = {**os.environ, "VIDPIPE_RECORD_JOBS": "true"}   # 沒有紀錄就沒有 job 可看
-    with tempfile.TemporaryFile() as errfile:
-        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=errfile, env=env, start_new_session=True)
-        threading.Thread(target=proc.wait, daemon=True).start()   # 收屍，免得留 zombie
-        job_id = _wait_for_job(cfg, proc, errfile)
+    job_id = _spawn(cfg, cmd)
     return {"short_id": short_id, "op": op, "job": job_id, "status_url": f"/api/job/{job_id}"}

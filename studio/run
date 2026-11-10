@@ -1,3 +1,5 @@
 #!/bin/sh
-# studio 的入口:./run run|batch|status(見 README.md)
-cd "$(dirname "$0")" && exec python3 -m pipeline.cli "$@"
+# studio 的入口:./run run|batch|status(見 README.md)。用 repo 的 .venv(要 import vidpipe)。
+cd "$(dirname "$0")" || exit 1
+PY=../.venv/bin/python; [ -x "$PY" ] || PY=python3
+exec "$PY" -m pipeline.cli "$@"

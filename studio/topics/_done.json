@@ -1,0 +1,44 @@
+[
+  {
+    "run_id": "20261110_letting-go_short",
+    "topic": "letting-go",
+    "format": "short",
+    "duration": 48.7,
+    "out": "out/20261110_letting-go_short"
+  },
+  {
+    "run_id": "20261110_impermanence_short",
+    "topic": "impermanence",
+    "format": "short",
+    "duration": 53.2,
+    "out": "out/20261110_impermanence_short"
+  },
+  {
+    "run_id": "20261110_attachment_short",
+    "topic": "attachment",
+    "format": "short",
+    "duration": 79.7,
+    "out": "out/20261110_attachment_short"
+  },
+  {
+    "run_id": "20261110_comparison_short",
+    "topic": "comparison",
+    "format": "short",
+    "duration": 103.3,
+    "out": "out/20261110_comparison_short"
+  },
+  {
+    "run_id": "20261110_anger_short",
+    "topic": "anger",
+    "format": "short",
+    "duration": 55.7,
+    "out": "out/20261110_anger_short"
+  },
+  {
+    "run_id": "20261110_mindfulness_short",
+    "topic": "mindfulness",
+    "format": "short",
+    "duration": 84.3,
+    "out": "out/20261110_mindfulness_short"
+  }
+]
