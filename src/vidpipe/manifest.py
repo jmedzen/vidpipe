@@ -20,7 +20,9 @@ agent 寫（或之後由 `plan` 產生）一份 JSON，`narrate`、`render` 都�
       ],
       "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
       "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true},
-      "cover": {"at": 1.0, "text": "台北夜市"}            // 選填；text 預設用 title，"" 不放字
+      "cover": {"at": 1.0, "text": "台北夜市"},           // 選填；text 預設用 title，"" 不放字
+      "overlays": [{"text": "為什麼越想放下，越放不下？", "position": "top",
+                    "size": "large", "color": "yellow"}]   // 選填；整支片都在的疊字
     }
 
 一個 scene 的旁白可以給 `text`（自動分句）或 `sentences`（明確列出每一句，雙語字幕要配對英文時用）。
@@ -46,6 +48,12 @@ SUBTITLE_LANGS = ("zh-TW", "zh-TW+en")
 SUBTITLE_STYLES = ("bold-bottom",)
 # 本機檔案（clip.path、music.path）可以宣告的授權：own＝自己做的；其餘兩個同 vidgrab 的分類
 FILE_LICENSES = ("own", "free", "free-attribution")
+# 常駐疊字（整支片都在的標題、系列名稱）
+OVERLAY_POSITIONS = ("top", "bottom")
+OVERLAY_SIZES = ("large", "medium", "small")
+OVERLAY_COLORS = ("white", "yellow")
+MAX_OVERLAYS = 4
+MAX_OVERLAY_CHARS = 40
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,7 @@ class Manifest:
     subtitles: Subtitles = field(default_factory=Subtitles)
     music: dict[str, Any] | None = None
     cover: dict[str, Any] | None = None   # {"at": 秒, "text": 標題}，都是選填
+    overlays: tuple[dict[str, str], ...] = ()   # 常駐疊字：{"text", "position", "size", "color"}
 
 
 # ------------------------------------------------------------------ 欄位檢查小工具
@@ -223,7 +232,7 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
     """dict → Manifest。`subtitle_langs`、`burn_in` 是 manifest 沒寫時的預設（來自設定）。"""
     top = _obj(data, "（最上層）",
                {"schema", "id", "title", "output", "voice", "timing", "scenes", "subtitles",
-                "music", "cover"}, {"schema", "id", "scenes"})
+                "music", "cover", "overlays"}, {"schema", "id", "scenes"})
     if top["schema"] != SCHEMA:
         raise _fail("schema", f"要是 {SCHEMA!r}（收到 {top['schema']!r}）")
     mid = _str(top["id"], "id")
@@ -271,6 +280,24 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
         cover = {k: (_num(v, "cover.at", hi=36000) if k == "at"
                      else _str(v, "cover.text", allow_empty=True)) for k, v in c.items()}
 
+    overlays: list[dict[str, str]] = []
+    if top.get("overlays") is not None:
+        items = top["overlays"]
+        if not isinstance(items, list) or len(items) > MAX_OVERLAYS:
+            raise _fail("overlays", f"要是清單，最多 {MAX_OVERLAYS} 個")
+        for i, item in enumerate(items):
+            p = f"overlays[{i}]"
+            o = _obj(item, p, {"text", "position", "size", "color"}, {"text"})
+            label = _str(o["text"], f"{p}.text")
+            if len(label) > MAX_OVERLAY_CHARS:
+                raise _fail(f"{p}.text", f"最長 {MAX_OVERLAY_CHARS} 個字（收到 {len(label)}）",
+                            "疊字整支片都在畫面上，要短")
+            overlays.append({
+                "text": label,
+                "position": _choice(o.get("position", "top"), f"{p}.position", OVERLAY_POSITIONS),
+                "size": _choice(o.get("size", "medium"), f"{p}.size", OVERLAY_SIZES),
+                "color": _choice(o.get("color", "white"), f"{p}.color", OVERLAY_COLORS)})
+
     raw_scenes = top["scenes"]
     if not isinstance(raw_scenes, list) or not raw_scenes:
         raise _fail("scenes", "要是非空的清單")
@@ -281,7 +308,8 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
             raise _fail(f"scenes[{i}].id", f"{sc.id!r} 重複了")
         seen.add(sc.id)
     title = _str(top.get("title", ""), "title", allow_empty=True)
-    return Manifest(mid, scenes, title, spec, aspect, voice, timing, subtitles, music, cover)
+    return Manifest(mid, scenes, title, spec, aspect, voice, timing, subtitles, music, cover,
+                    tuple(overlays))
 
 
 def read_json(path: str | Path) -> Any:

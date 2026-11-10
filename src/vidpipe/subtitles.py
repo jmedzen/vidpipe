@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -288,13 +289,46 @@ def _ass_text(line: str) -> str:
     return line.replace("{", "｛").replace("}", "｝").replace("\\", "＼")
 
 
-def to_ass(entries: list[Entry], layout: Layout, font: str) -> str:
+OVERLAY_SCALE = {"large": 1.2, "medium": 1.0, "small": 0.6}
+OVERLAY_COLOR = {"white": "&H00FFFFFF", "yellow": "&H0033DDFF"}   # ASS 是 BGR
+OVERLAY_MAX_LINES = 2
+
+
+def _overlay_margin(layout: Layout, position: str) -> int:
+    """疊字離上／下緣多遠：避開 Shorts 的介面，也不跟字幕（離底 20%／8%）疊在一起。"""
+    portrait = layout.height > layout.width
+    if position == "top":
+        return round(layout.height * (0.09 if portrait else 0.05))
+    return round(layout.height * (0.115 if portrait else 0.02))
+
+
+def _overlay_lines(overlays: Sequence[dict[str, str]], layout: Layout, total: float) -> tuple[
+        list[str], list[str]]:
+    """常駐疊字 → (ASS 樣式行, ASS 事件行)。從第 0 秒顯示到片尾，放在字幕下面那一層。"""
+    styles, events = [], []
+    for i, o in enumerate(overlays):
+        size = round(layout.font_size * OVERLAY_SCALE[o["size"]])
+        align = 8 if o["position"] == "top" else 2
+        color = OVERLAY_COLOR[o["color"]]
+        styles.append(
+            f"Style: Overlay{i},{{font}},{size},{color},{color},&H00000000,&H78000000,-1,0,0,0,"
+            f"100,100,0,0,1,{max(2, round(size * 0.08))},1,{align},{layout.margin_side},"
+            f"{layout.margin_side},{_overlay_margin(layout, o['position'])},1")
+        lines = wrap(o["text"], layout.usable / size)[:OVERLAY_MAX_LINES]
+        text = "\\N".join(_ass_text(x) for x in lines)
+        events.append(f"Dialogue: 0,{_ass_time(0)},{_ass_time(total)},Overlay{i},,0,0,0,,{text}")
+    return styles, events
+
+
+def to_ass(entries: list[Entry], layout: Layout, font: str,
+           overlays: Sequence[dict[str, str]] = (), total: float = 0.0) -> str:
     def style(name: str, size: int, color: str) -> str:
         # Bold=-1、BorderStyle=1（描邊）、Alignment=2（底部置中）
         return (f"Style: {name},{font},{size},{color},{color},&H00000000,&H78000000,-1,0,0,0,"
                 f"100,100,0,0,1,{layout.outline},1,2,{layout.margin_side},{layout.margin_side},"
                 f"{layout.margin_bottom},1")
 
+    overlay_styles, overlay_events = _overlay_lines(overlays, layout, total)
     lines = [
         "[Script Info]",
         "; 由 vidpipe 產生",
@@ -310,10 +344,12 @@ def to_ass(entries: list[Entry], layout: Layout, font: str) -> str:
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         style("Default", layout.font_size, "&H00FFFFFF"),
         style("En", layout.en_size, "&H0066E0FF"),
+        *(line.replace("{font}", font) for line in overlay_styles),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
+    lines += overlay_events
     for e in entries:
         text = "\\N".join(_ass_text(x) for x in e.zh)
         if e.en:
@@ -322,7 +358,10 @@ def to_ass(entries: list[Entry], layout: Layout, font: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build(timeline: Timeline, subtitles: Subtitles, spec: OutputSpec, font: str) -> Subs:
+def build(timeline: Timeline, subtitles: Subtitles, spec: OutputSpec, font: str,
+          overlays: Sequence[dict[str, str]] = ()) -> Subs:
+    """字幕檔。`overlays`（manifest 的常駐疊字）只進 `.ass`（燒進畫面的那一份），不進 `.srt`。"""
     layout = layout_for(spec)
     entries, warnings = entries_for(timeline, subtitles, layout)
-    return Subs(tuple(entries), to_srt(entries), to_ass(entries, layout, font), tuple(warnings))
+    return Subs(tuple(entries), to_srt(entries),
+                to_ass(entries, layout, font, overlays, timeline.total), tuple(warnings))

@@ -332,3 +332,28 @@ def test_burned_in_subtitles_land_in_the_bottom_area_clear_of_the_shorts_overlay
     assert min(rows) > 960 * 0.5                         # 在畫面下半部，不是亂跑
     assert not bright_rows(out, 0.02, 540, 960)          # 聲音還沒開始時沒有字
     assert re.search(r"-->", subs.srt)
+
+
+def test_overlays_are_drawn_for_the_whole_video_and_stay_out_of_the_srt():
+    m = parse([{"id": "a", "text": "你好，世界。"}],
+              overlays=[{"text": "為什麼越想放下，越放不下？", "size": "large", "color": "yellow"},
+                        {"text": "一分鐘佛法", "position": "bottom", "size": "small"}])
+    tl = timeline.build(m, clips_for(m, [1.0]))
+    subs = subtitles.build(tl, m.subtitles, PORTRAIT, "My Font", m.overlays)
+    ass = subs.ass.splitlines()
+    top = next(x for x in ass if x.startswith("Style: Overlay0")).removeprefix("Style: ").split(",")
+    # 上方、黃色、比字幕大；離上緣 9%
+    assert top[1:4] == ["My Font", "78", "&H0033DDFF"] and top[18] == "8" and top[21] == "173"
+    bottom = next(x for x in ass if x.startswith("Style: Overlay1"))
+    bottom = bottom.removeprefix("Style: ").split(",")
+    # 下方、白色、小字；在字幕（離底 384）下面
+    assert bottom[2:4] == ["39", "&H00FFFFFF"] and bottom[18] == "2" and int(bottom[21]) < 384
+    end = subtitles._ass_time(tl.total)
+    assert f"Dialogue: 0,0:00:00.00,{end},Overlay0,,0,0,0,,為什麼越想放下，\\N越放不下？" in ass
+    assert f"Dialogue: 0,0:00:00.00,{end},Overlay1,,0,0,0,,一分鐘佛法" in ass
+    assert "一分鐘佛法" not in subs.srt and "放下" not in subs.srt
+
+
+def test_without_overlays_the_ass_is_unchanged():
+    _, subs = build_for([{"id": "a", "text": "你好，世界。"}], [1.0])
+    assert "Overlay" not in subs.ass and subs.ass.count("Dialogue:") == 1

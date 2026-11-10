@@ -217,3 +217,17 @@ def test_licence_declarations_are_checked():
     fails(doc(scenes=[{**scene, "clip": {"path": "/a.mp4", "credit": "Bob"}}]),
           "scenes[0].clip.credit", "license")
     fails(doc(music={"path": "/a.mp3", "license": "free-attribution"}), "music.license", "credit")
+
+
+def test_overlays_get_defaults_and_are_validated():
+    m = manifest.parse(doc(overlays=[{"text": "為什麼？"}, {"text": "系列", "position": "bottom",
+                                                         "size": "small", "color": "yellow"}]))
+    assert m.overlays[0] == {"text": "為什麼？", "position": "top", "size": "medium",
+                             "color": "white"}
+    assert m.overlays[1]["position"] == "bottom"
+    assert manifest.parse(doc()).overlays == ()
+    fails(doc(overlays=[{"text": "x", "where": "top"}]), "overlays[0]", "where")
+    fails(doc(overlays=[{"text": "x", "position": "middle"}]), "overlays[0].position")
+    fails(doc(overlays=[{"text": "字" * 41}]), "overlays[0].text", "40")
+    fails(doc(overlays=[{"text": "x"}] * 5), "overlays", "最多 4 個")
+    fails(doc(overlays={"text": "x"}), "overlays")
