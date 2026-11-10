@@ -125,6 +125,7 @@ def assign(scenes: list[dict], pools: dict[str, list[dict]], run_id: str,
     scenes: [{"id", "visual", "seconds"}];banned 是品質檢查退回的素材 id。
     """
     used: dict[str, int] = {}
+    starts: dict[str, list[float]] = {}
     out = []
     for sc in scenes:
         cands = [it for it in pools.get(sc["visual"], []) if it["id"] not in (banned or set())]
@@ -137,11 +138,15 @@ def assign(scenes: list[dict], pools: dict[str, list[dict]], run_id: str,
         tier.sort(key=lambda it: (it["id"] == last, used.get(it["id"], 0),
                                   _unit(run_id, sc["id"], it["id"])))
         item = tier[0]
-        n = used.get(item["id"], 0)
-        used[item["id"]] = n + 1
+        used[item["id"]] = used.get(item["id"], 0) + 1
         duration = float(item.get("duration") or 0)
         room = max(0.0, duration * 0.58 - sc["seconds"])
-        frac = (_unit(run_id, item["id"]) + n * 0.29) % 1.0   # 重複使用同一支時錯開起點
-        start = round(duration * 0.12 + room * frac, 1)
+        base = duration * 0.12
+        before = starts.setdefault(item["id"], [])
+        # 同一支素材用第二次以上:在可用範圍裡挑離之前用過的起點最遠的位置,畫面才不會幾乎一樣
+        options = [base + room * ((_unit(run_id, item["id"]) + k / 12) % 1.0) for k in range(12)]
+        start = round(max(options, key=lambda x: min((abs(x - y) for y in before), default=0.0))
+                      if before else options[0], 1)
+        before.append(start)
         out.append({"scene": sc["id"], "asset_id": item["id"], "start": start, "item": item})
     return out
