@@ -1,0 +1,73 @@
+{
+ "script": {
+  "hooks": [
+   "為什麼越想放下，反而越放不下？"
+  ],
+  "hook": "為什麼越想放下，反而越放不下？",
+  "title": "為什麼越想放下，反而越放不下？",
+  "scenes": [
+   {
+    "role": "hook",
+    "visual": "window",
+    "text": "為什麼越想放下,反而越放不下?睡前一躺下，白天的事又自己跑出來。"
+   },
+   {
+    "role": "insight",
+    "visual": "ripples",
+    "text": "佛陀說，苦來自渴愛，就是一直想抓住的心。渴愛止息了，苦也就跟著停了。"
+   },
+   {
+    "role": "practice",
+    "visual": "candle",
+    "text": "今晚念頭又來，就在心裡說一聲，我看到了。然後輕輕鬆手，回到呼吸。"
+   },
+   {
+    "role": "closing",
+    "visual": "sky",
+    "text": "想放下，就先別用力。鬆了手，就放下了。"
+   }
+  ],
+  "closing": "鬆了手，就放下了。",
+  "practice": "念頭來時說一聲我看到了",
+  "sources": [
+   {
+    "work": "四聖諦",
+    "note": "概念依據",
+    "used_for": "觀點"
+   }
+  ]
+ },
+ "review": {
+  "pass": true,
+  "scores": {
+   "hook": 4,
+   "everyday": 4,
+   "dharma": 4,
+   "pacing": 4,
+   "tone": 4,
+   "spoken": 4
+  },
+  "issues": [],
+  "doubts": [],
+  "summary": "可以"
+ },
+ "package": {
+  "titles": [
+   "a",
+   "b",
+   "c"
+  ],
+  "summary": "摘要",
+  "practice": "練習",
+  "sources_text": "四聖諦",
+  "tags": [
+   "佛法"
+  ],
+  "hashtags": [
+   "#佛法",
+   "#Shorts"
+  ],
+  "pinned_comment": "你呢？"
+ },
+ "long_scene": "佛陀說，苦來自渴愛，就是一直想抓住的心。渴愛止息了，苦也就跟著停了。這叫滅諦。"
+}

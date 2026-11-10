@@ -1,0 +1,157 @@
+{
+ "note": "畫面主題 → vidgrab 的搜尋關鍵字。腳本每個場景挑一個主題(visual)。關鍵字刻意帶 free stock footage / no copyright / 無版權,YouTube 上這類影片多半標 CC BY,vidgrab 會驗證並標成 free-attribution。",
+ "search": {
+  "platform": "youtube",
+  "per_keyword": 10,
+  "min_duration": 1,
+  "max_duration": 90,
+  "verify_license": true,
+  "sort": "license"
+ },
+ "exclude_title": [
+  "podcast",
+  "interview",
+  "ASMR",
+  "教學",
+  "教程",
+  "tutorial",
+  "reaction",
+  "vlog",
+  "直播",
+  "live",
+  "music video",
+  "MV",
+  "lyrics",
+  "歌詞",
+  "trailer",
+  "預告",
+  "AI",
+  "AIGC",
+  "shorts",
+  "#shorts",
+  "meme",
+  "梗"
+ ],
+ "themes": {
+  "ocean": [
+   "ocean waves 4k free stock footage no copyright",
+   "海浪 空鏡 4K 無版權 免費素材"
+  ],
+  "forest": [
+   "forest sunlight trees 4k free stock footage no copyright",
+   "森林 陽光 空鏡 4K 無版權 免費素材"
+  ],
+  "mountain": [
+   "mountain landscape drone 4k free stock footage no copyright",
+   "山 雲海 空鏡 4K 無版權 免費素材"
+  ],
+  "sky": [
+   "clouds timelapse sky 4k free stock footage no copyright",
+   "雲 縮時 空鏡 4K 無版權 免費素材"
+  ],
+  "rain": [
+   "rain on window 4k free stock footage no copyright",
+   "下雨 窗戶 空鏡 4K 無版權 免費素材"
+  ],
+  "river": [
+   "river stream water flowing 4k free stock footage no copyright",
+   "溪流 空鏡 4K 無版權 免費素材"
+  ],
+  "sunrise": [
+   "sunrise golden hour landscape 4k free stock footage no copyright",
+   "日出 空鏡 4K 無版權 免費素材"
+  ],
+  "night-city": [
+   "city night lights traffic 4k free stock footage no copyright",
+   "城市 夜景 空鏡 4K 無版權 免費素材"
+  ],
+  "crowd": [
+   "people walking city street crowd free stock footage no copyright",
+   "街頭 人群 空鏡 4K 無版權 免費素材"
+  ],
+  "commute": [
+   "subway train commute people free stock footage no copyright",
+   "捷運 通勤 空鏡 4K 無版權 免費素材"
+  ],
+  "office": [
+   "office working laptop typing free stock footage no copyright",
+   "辦公室 打字 空鏡 4K 無版權 免費素材"
+  ],
+  "phone": [
+   "person using smartphone scrolling free stock footage no copyright",
+   "滑手機 空鏡 4K 無版權 免費素材"
+  ],
+  "coffee": [
+   "coffee cup steam morning free stock footage no copyright",
+   "咖啡 熱氣 空鏡 4K 無版權 免費素材"
+  ],
+  "candle": [
+   "candle flame dark 4k free stock footage no copyright",
+   "蠟燭 燭光 空鏡 4K 無版權 免費素材"
+  ],
+  "temple": [
+   "buddhist temple incense free stock footage no copyright",
+   "寺院 香 空鏡 4K 無版權 免費素材"
+  ],
+  "lotus": [
+   "lotus flower pond 4k free stock footage no copyright",
+   "荷花 蓮花 空鏡 4K 無版權 免費素材"
+  ],
+  "leaves": [
+   "autumn leaves falling 4k free stock footage no copyright",
+   "落葉 秋天 空鏡 4K 無版權 免費素材"
+  ],
+  "stars": [
+   "night sky stars milky way timelapse free stock footage no copyright",
+   "星空 銀河 空鏡 4K 無版權 免費素材"
+  ],
+  "sand": [
+   "sand dunes desert wind 4k free stock footage no copyright",
+   "沙漠 沙丘 空鏡 4K 無版權 免費素材"
+  ],
+  "fire": [
+   "campfire flames close up free stock footage no copyright",
+   "營火 火焰 空鏡 4K 無版權 免費素材"
+  ],
+  "walking": [
+   "walking feet path nature free stock footage no copyright",
+   "走路 腳步 空鏡 4K 無版權 免費素材"
+  ],
+  "traffic": [
+   "traffic jam cars highway free stock footage no copyright",
+   "塞車 車流 空鏡 4K 無版權 免費素材"
+  ],
+  "tea": [
+   "pouring tea cup close up free stock footage no copyright",
+   "泡茶 倒茶 空鏡 4K 無版權 免費素材"
+  ],
+  "window": [
+   "sunlight through window curtain room free stock footage no copyright",
+   "窗邊 陽光 空鏡 4K 無版權 免費素材"
+  ],
+  "bamboo": [
+   "bamboo forest wind 4k free stock footage no copyright",
+   "竹林 空鏡 4K 無版權 免費素材"
+  ],
+  "moon": [
+   "full moon night clouds 4k free stock footage no copyright",
+   "月亮 夜空 空鏡 4K 無版權 免費素材"
+  ],
+  "waterfall": [
+   "waterfall nature 4k free stock footage no copyright",
+   "瀑布 空鏡 4K 無版權 免費素材"
+  ],
+  "flowers": [
+   "flowers blooming timelapse 4k free stock footage no copyright",
+   "花開 縮時 空鏡 4K 無版權 免費素材"
+  ],
+  "ripples": [
+   "water drop ripples slow motion free stock footage no copyright",
+   "水滴 漣漪 空鏡 4K 無版權 免費素材"
+  ],
+  "home": [
+   "cozy home living room evening free stock footage no copyright",
+   "客廳 夜晚 空鏡 4K 無版權 免費素材"
+  ]
+ }
+}

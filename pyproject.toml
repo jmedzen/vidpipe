@@ -33,7 +33,7 @@ where = ["src"]
 vidpipe = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "studio/tests"]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,41 @@
+{
+  "vidpipe": {
+    "bin": "../.venv/bin/vidpipe",
+    "env": {
+      "VIDPIPE_TTS_BASE_URL": "http://127.0.0.1:8301",
+      "VIDPIPE_VIDGRAB_URL": "http://127.0.0.1:8310",
+      "VIDPIPE_SUBTITLE_FONT": "PingFang TC"
+    },
+    "path_prepend": "~/.local/bin",
+    "timeout": 3600
+  },
+  "voice": {
+    "model": "drama3",
+    "voice_ref": "/Users/jm/SyncDev/23-ref Audio/Ref-Audio-馬克思2.wav",
+    "reference_text": "Fine, give me the bin chip, one less CPU core, whatever. But also I'm just, I'm curious about that nano texture, cause that looks nice. And this seems like a product should probably get it on, right? It's been getting better and better over the years. It's really good at canceling out"
+  },
+  "timing": {
+    "lead": 0.2,
+    "gap": 0.3,
+    "tail": 0.45
+  },
+  "series": "一分鐘佛法",
+  "font": "PingFang TC",
+  "visuals": {
+    "source": "vidgrab-youtube",
+    "allow_unknown_license": true
+  },
+  "music": {
+    "tracks": [
+      "openverse:9e753e56-aadf-4fe7-8c43-aa203d122af9",
+      "openverse:80fade4a-66e0-45dd-9afc-dcd7dc8a550c",
+      "openverse:5dc042e4-6953-4bb7-a896-768624f30f1b"
+    ],
+    "volume": 0.22,
+    "start": 4,
+    "duck_under_voice": true
+  },
+  "chars_per_second": 4.2,
+  "review_max_rounds": 3,
+  "target_lufs": -14
+}

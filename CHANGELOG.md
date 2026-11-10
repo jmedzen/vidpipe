@@ -27,3 +27,11 @@
 - **改了什麼**：加增益後峰值會超過上限時，改用「加增益＋限幅器」，並量一次結果把限幅吃掉的響度補回去
   （最多三輪，離目標 0.3 LU 以內就停）。峰值夠低的聲音照舊走 loudnorm 線性模式，結果不變。
 - **驗證**：同一段真實旁白，原本 -15.9 LUFS，現在 -14.4 LUFS、真峰值 -1.4 dBTP。
+
+## `studio/`：從主題到可上傳的影片
+
+- **為什麼**：選題、腳本、審稿、包裝、品質檢查原本放在另一個 repo（vidoutput），跟 vidpipe「最後合成」的定位重疊。
+  vidpipe 是上層，vidgrab 與 audio.cpp 是它的下游，這些上游步驟放在同一個 repo 比較好維護。
+- **改了什麼**：新增 `studio/`（程式、提示詞、主題庫、文件、測試）。`studio/work`、`studio/out` 不進版控；
+  `.dockerignore` 排除 `studio`，映像與線上服務不變。`pytest` 多跑 `studio/tests`（離線，假的 vidpipe 與素材池）。
+- **相容性**：`src/vidpipe` 沒有任何改動。

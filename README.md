@@ -11,6 +11,9 @@ Shorts 流水線：**腳本 → 旁白與字幕 → 素材 → 9:16 成品**。
 
 > 狀態：整條流水線都能用了：`plan`（挑素材與音樂）→ `narrate`（逐句旁白、時間軸、字幕）→ `render`（9:16 成片、背景音樂 ducking、響度標準化、封面、credits），或 `make` 一次做完；`doctor` 檢查環境。入口有四種：CLI、HTTP API、MCP（stdio 與 HTTP，含 `plan_short`）、網頁介面（`vidpipe serve`：作品頁、編輯場景、換素材、可直接改設定的設定頁、六組主題；macOS 可點兩下 `start-vidpipe-8320.command`）。
 
+> **從主題到可上傳的影片**（選題、腳本、審稿、挑素材、包裝、品質檢查）在 [`studio/`](studio/README.md)：
+> 它在 vidpipe 的上游，成片仍然是呼叫 vidpipe。不進 Docker 映像，不影響 `vidpipe serve`。
+
 ## 快速開始
 
 ```bash
