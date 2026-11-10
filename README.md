@@ -163,6 +163,9 @@ agent 寫一份 JSON，`validate`／`narrate`／`render` 都只讀它；同一�
 - `voice` 寫了就蓋過設定檔與環境變數（寫空字串 = 明確要伺服器預設）；`subtitles` 沒寫的欄位用設定檔的 `subtitle_langs`／`burn_subtitles`。
 - **不認得的欄位一律報錯**（多半是打錯字），訊息帶路徑與可用欄位，例如 `manifest scenes[1]：不認得的欄位 txt`。
 - 每個場景的 `clip` 擇一給 `asset_id`（vidgrab 的素材 id）或 `path`（本機檔案）；素材怎麼取得與裁切見下面的 `render`。
+- **本機檔案可以宣告授權**：`clip` 與 `music` 用 `path` 時可加 `"license"`（`own`＝自己做的、`free`＝可自由使用、
+  `free-attribution`＝可用需標註）與 `"credit"`（作者與出處；`free-attribution` 必填）。宣告過的檔案在 `credits.md`
+  不再標 ⚠️，`credit` 會進說明欄範本；沒宣告的照舊列進 `unclear`。`asset_id` 的授權由 vidgrab 回報，不能自己宣告。
 
 ```bash
 vidpipe validate shorts.json   # 只檢查，不呼叫 TTS：每個場景的分句、字數、粗估秒數

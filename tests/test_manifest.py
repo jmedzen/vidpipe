@@ -196,3 +196,24 @@ def test_load_reports_missing_file_and_bad_json(tmp_path):
     good.write_text(json.dumps(BASE, ensure_ascii=False), encoding="utf-8")
     assert manifest.load(good).id == "taipei-night-01"
     assert manifest.read_json(good) == BASE
+
+
+def test_local_files_can_declare_a_licence():
+    m = manifest.parse(doc(
+        scenes=[{"id": "s1", "text": "夜市很熱鬧。",
+                 "clip": {"path": "/a/bg.mp4", "license": "own"}}],
+        music={"path": "/a/song.mp3", "license": "free-attribution",
+               "credit": "Bob（CC BY 4.0）— https://x/song"}))
+    assert m.scenes[0].clip == {"path": "/a/bg.mp4", "license": "own"}
+    assert m.music["license"] == "free-attribution" and m.music["credit"].startswith("Bob")
+
+
+def test_licence_declarations_are_checked():
+    scene = {"id": "s1", "text": "夜市很熱鬧。"}
+    fails(doc(scenes=[{**scene, "clip": {"asset_id": "pixabay:1", "license": "own"}}]),
+          "scenes[0].clip.license", "只有本機檔案")
+    fails(doc(scenes=[{**scene, "clip": {"path": "/a.mp4", "license": "mine"}}]),
+          "scenes[0].clip.license")
+    fails(doc(scenes=[{**scene, "clip": {"path": "/a.mp4", "credit": "Bob"}}]),
+          "scenes[0].clip.credit", "license")
+    fails(doc(music={"path": "/a.mp3", "license": "free-attribution"}), "music.license", "credit")

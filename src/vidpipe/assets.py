@@ -147,8 +147,11 @@ def _resolve_path(clip: dict[str, Any], where: str, kind: str = "video") -> Reso
         raise NotFound(f"{where}：找不到素材檔 {path}",
                        hint="路徑相對於執行 vidpipe 的目錄；用絕對路徑最穩（Docker 要掛載進去）")
     _check_media(str(path), where, kind)
-    return Resolved(str(path), float(clip.get("start", 0.0)),
-                    {"kind": "file", "path": str(path.resolve())})
+    credit: dict[str, Any] = {"kind": "file", "path": str(path.resolve())}
+    for key in ("license", "credit"):     # manifest 宣告的授權（own／free／free-attribution）與出處
+        if clip.get(key):
+            credit["declared_" + key] = str(clip[key])
+    return Resolved(str(path), float(clip.get("start", 0.0)), credit)
 
 
 def _grab(client: VidgrabClient, project: str, item: dict[str, Any], asset_id: str,
