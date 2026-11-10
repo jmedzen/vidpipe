@@ -447,3 +447,22 @@ def test_bad_public_url_is_a_structured_500(start, monkeypatch, bad):
     monkeypatch.setenv("VIDPIPE_VIDGRAB_PUBLIC_URL", bad)
     resp = start().get("/api/config")
     assert resp.status_code == 500 and _err(resp)["code"] == "bad_config"
+
+
+def test_restart_endpoint_answers_then_stops_the_server_and_reexecs_with_the_same_args(monkeypatch):
+    from vidpipe import server
+
+    stopped = []
+    monkeypatch.setattr(server, "RESTART", server.threading.Event())
+
+    class Httpd:
+        def shutdown(self):
+            stopped.append(True)
+
+    server.request_restart(Httpd(), delay=0.01)
+    import time
+    time.sleep(0.2)
+    assert server.RESTART.is_set() and stopped == [True]
+    argv = server.restart_argv(["/x/vidpipe", "serve", "--port", "8320", "--no-auth"])
+    assert argv[1:] == ["-m", "vidpipe", "serve", "--port", "8320", "--no-auth", "--no-open"]
+    assert server.restart_argv(["v", "serve", "--no-open"]).count("--no-open") == 1

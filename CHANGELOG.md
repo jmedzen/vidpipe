@@ -50,3 +50,9 @@
   加大的標題與字幕、背景音樂。別的作品用過的素材不再用，不夠就換關鍵字再搜。CLI `vidpipe quick`（單筆、CSV、JSON、JSONL）、
   HTTP `POST /api/quick` 與 `/api/quick/preview`。`studio/` 改成共用這個模組，不再有自己的一份。
 - **相容性**：既有指令與端點不變；`data/footage.json` 隨套件安裝。
+
+## `POST /api/restart`
+
+- **為什麼**：本機用 `nohup` 起的 `vidpipe serve` 在 `git pull` 之後要重啟才會載入新版，原本得到終端機找行程。
+- **改了什麼**：`POST /api/restart` 回 202 之後停掉伺服器，用同樣的參數（加上 `--no-open`）重新執行自己。
+  跟其他寫入類端點一樣受 token、Host 與 Origin 檢查保護。
