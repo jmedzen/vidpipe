@@ -72,8 +72,13 @@ class Layout:
         return self.usable / self.en_size
 
 
-def layout_for(spec: OutputSpec) -> Layout:
-    size = round(min(spec.width, spec.height) * 0.06)  # 以短邊為準：橫式不會變成巨大的字
+BASE_SIZE = 0.06             # 字級佔短邊的比例（normal）
+SIZE_SCALE = {"normal": 1.0, "large": 1.25, "xlarge": 1.5}
+
+
+def layout_for(spec: OutputSpec, size_name: str = "normal") -> Layout:
+    # 以短邊為準：橫式不會變成巨大的字
+    size = round(min(spec.width, spec.height) * BASE_SIZE * SIZE_SCALE[size_name])
     portrait = spec.height > spec.width
     return Layout(width=spec.width, height=spec.height, font_size=size,
                   en_size=round(size * EN_SCALE), outline=max(2, round(size * 0.08)),
@@ -289,9 +294,9 @@ def _ass_text(line: str) -> str:
     return line.replace("{", "｛").replace("}", "｝").replace("\\", "＼")
 
 
-OVERLAY_SCALE = {"large": 1.2, "medium": 1.0, "small": 0.6}
+OVERLAY_SCALE = {"xlarge": 1.6, "large": 1.2, "medium": 1.0, "small": 0.6}
 OVERLAY_COLOR = {"white": "&H00FFFFFF", "yellow": "&H0033DDFF"}   # ASS 是 BGR
-OVERLAY_MAX_LINES = 2
+OVERLAY_MAX_LINES = 3
 
 
 def _overlay_margin(layout: Layout, position: str) -> int:
@@ -307,7 +312,9 @@ def _overlay_lines(overlays: Sequence[dict[str, str]], layout: Layout, total: fl
     """常駐疊字 → (ASS 樣式行, ASS 事件行)。從第 0 秒顯示到片尾，放在字幕下面那一層。"""
     styles, events = [], []
     for i, o in enumerate(overlays):
-        size = round(layout.font_size * OVERLAY_SCALE[o["size"]])
+        # 疊字的大小以 normal 字級為準，不跟著 subtitles.size 一起放大
+        base = min(layout.width, layout.height) * BASE_SIZE
+        size = round(base * OVERLAY_SCALE[o["size"]])
         align = 8 if o["position"] == "top" else 2
         color = OVERLAY_COLOR[o["color"]]
         styles.append(
@@ -361,7 +368,7 @@ def to_ass(entries: list[Entry], layout: Layout, font: str,
 def build(timeline: Timeline, subtitles: Subtitles, spec: OutputSpec, font: str,
           overlays: Sequence[dict[str, str]] = ()) -> Subs:
     """字幕檔。`overlays`（manifest 的常駐疊字）只進 `.ass`（燒進畫面的那一份），不進 `.srt`。"""
-    layout = layout_for(spec)
+    layout = layout_for(spec, subtitles.size)
     entries, warnings = entries_for(timeline, subtitles, layout)
     return Subs(tuple(entries), to_srt(entries),
                 to_ass(entries, layout, font, overlays, timeline.total), tuple(warnings))

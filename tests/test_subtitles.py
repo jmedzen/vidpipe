@@ -357,3 +357,31 @@ def test_overlays_are_drawn_for_the_whole_video_and_stay_out_of_the_srt():
 def test_without_overlays_the_ass_is_unchanged():
     _, subs = build_for([{"id": "a", "text": "你好，世界。"}], [1.0])
     assert "Overlay" not in subs.ass and subs.ass.count("Dialogue:") == 1
+
+
+def test_subtitle_size_scales_the_font_and_fits_fewer_characters_per_line():
+    text = "今晚念頭又來，就在心裡說一聲，我看到了。"
+    sizes = {}
+    for name in ("normal", "large", "xlarge"):
+        m = parse([{"id": "a", "text": text}], subtitles={"size": name})
+        tl = timeline.build(m, clips_for(m, [3.0]))
+        subs = subtitles.build(tl, m.subtitles, PORTRAIT, "My Font")
+        style = next(x for x in subs.ass.splitlines() if x.startswith("Style: Default"))
+        sizes[name] = int(style.split(",")[2])
+        longest = max(len(line) for e in subs.entries for line in e.zh)
+        assert longest * sizes[name] <= 1080 * 0.86 + sizes[name]      # 不會超出左右邊界
+    assert sizes == {"normal": 65, "large": 81, "xlarge": 97}
+
+
+def test_overlay_sizes_do_not_follow_the_subtitle_size_and_xlarge_wraps_to_three_lines():
+    title = "為什麼別人過得好，我就覺得自己很差？"
+    m = parse([{"id": "a", "text": "你好。"}], subtitles={"size": "xlarge"},
+              overlays=[{"text": title, "size": "xlarge"}, {"text": "系列", "size": "medium"}])
+    tl = timeline.build(m, clips_for(m, [1.0]))
+    ass = subtitles.build(tl, m.subtitles, PORTRAIT, "F", m.overlays).ass.splitlines()
+    big = next(x for x in ass if x.startswith("Style: Overlay0")).split(",")
+    medium = next(x for x in ass if x.startswith("Style: Overlay1")).split(",")
+    assert (int(big[2]), int(medium[2])) == (104, 65)
+    event = next(x for x in ass if ",Overlay0," in x and x.startswith("Dialogue"))
+    shown = event.split(",,", 2)[-1].split(",,")[-1]
+    assert shown.replace("\\N", "") == title and shown.count("\\N") <= 2     # 整句都在，最多三行

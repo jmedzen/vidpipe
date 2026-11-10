@@ -46,11 +46,12 @@ SCHEMA = "vidpipe.manifest/1"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SUBTITLE_LANGS = ("zh-TW", "zh-TW+en")
 SUBTITLE_STYLES = ("bold-bottom",)
+SUBTITLE_SIZES = ("normal", "large", "xlarge")
 # 本機檔案（clip.path、music.path）可以宣告的授權：own＝自己做的；其餘兩個同 vidgrab 的分類
 FILE_LICENSES = ("own", "free", "free-attribution")
 # 常駐疊字（整支片都在的標題、系列名稱）
 OVERLAY_POSITIONS = ("top", "bottom")
-OVERLAY_SIZES = ("large", "medium", "small")
+OVERLAY_SIZES = ("xlarge", "large", "medium", "small")
 OVERLAY_COLORS = ("white", "yellow")
 MAX_OVERLAYS = 4
 MAX_OVERLAY_CHARS = 40
@@ -85,6 +86,7 @@ class Subtitles:
     langs: str = "zh-TW"
     burn_in: bool = True
     style: str = "bold-bottom"
+    size: str = "normal"      # 字幕字級：normal／large／xlarge
 
 
 @dataclass(frozen=True)
@@ -253,11 +255,12 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
     timing = Timing(*(_num(t.get(k, getattr(defaults, k)), f"timing.{k}", hi=10)
                       for k in ("lead", "gap", "tail")))
 
-    s = _obj(top.get("subtitles", {}), "subtitles", {"langs", "burn_in", "style"})
+    s = _obj(top.get("subtitles", {}), "subtitles", {"langs", "burn_in", "style", "size"})
     subtitles = Subtitles(
         langs=_choice(s.get("langs", subtitle_langs), "subtitles.langs", SUBTITLE_LANGS),
         burn_in=_bool(s["burn_in"], "subtitles.burn_in") if "burn_in" in s else burn_in,
-        style=_choice(s.get("style", "bold-bottom"), "subtitles.style", SUBTITLE_STYLES))
+        style=_choice(s.get("style", "bold-bottom"), "subtitles.style", SUBTITLE_STYLES),
+        size=_choice(s.get("size", "normal"), "subtitles.size", SUBTITLE_SIZES))
 
     music = None
     if "music" in top and top["music"] is not None:

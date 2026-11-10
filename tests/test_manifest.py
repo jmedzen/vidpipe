@@ -231,3 +231,11 @@ def test_overlays_get_defaults_and_are_validated():
     fails(doc(overlays=[{"text": "字" * 41}]), "overlays[0].text", "40")
     fails(doc(overlays=[{"text": "x"}] * 5), "overlays", "最多 4 個")
     fails(doc(overlays={"text": "x"}), "overlays")
+
+
+def test_subtitle_size_is_validated_and_defaults_to_normal():
+    assert manifest.parse(doc()).subtitles.size == "normal"
+    assert manifest.parse(doc(subtitles={"size": "xlarge"})).subtitles.size == "xlarge"
+    fails(doc(subtitles={"size": "huge"}), "subtitles.size")
+    assert manifest.parse(doc(overlays=[{"text": "x", "size": "xlarge"}])).overlays[0]["size"] \
+        == "xlarge"
