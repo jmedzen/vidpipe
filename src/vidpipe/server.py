@@ -336,6 +336,9 @@ class Handler(BaseHTTPRequestHandler):
             elif self.command == "POST" and route == "/api/validate":
                 manifest, _ = shorts_mod.parse_document(self._manifest_doc())
                 self._json({"ok": True, **shorts_mod.describe(manifest)})
+            elif self.command == "POST" and route == "/api/restart":
+                self._json({"ok": True, "restarting": True}, 202)
+                request_restart(self.server)
             elif self.command == "POST" and route == "/api/quick":
                 self._json({"ok": True, **shorts_mod.launch_quick(config_mod.load(),
                                                                   self._body())}, 202)
@@ -541,6 +544,27 @@ def make_server(host: str = "127.0.0.1", port: int = DEFAULT_PORT, *,
     return httpd
 
 
+RESTART = threading.Event()
+
+
+def request_restart(httpd: Any, delay: float = 0.3) -> None:
+    """`POST /api/restart`：回完這個請求之後停掉伺服器，`serve` 會用同樣的參數重新執行自己。
+
+    用途是更新程式碼（`git pull`）之後載入新版，不必到終端機找行程。跑到一半的工作是獨立的
+    子行程，不受影響；記錄也都在 work 目錄裡，重啟後照樣看得到。
+    """
+    RESTART.set()
+    threading.Timer(delay, httpd.shutdown).start()
+
+
+def restart_argv(argv: list[str]) -> list[str]:
+    """重新執行自己用的參數：原本的參數，加上 `--no-open`（不要每次重啟都再開一個瀏覽器分頁）。"""
+    args = list(argv[1:])
+    if "--no-open" not in args:
+        args.append("--no-open")
+    return [sys.executable, "-m", "vidpipe", *args]
+
+
 def serve(host: str | None = None, port: int | None = None, *, open_browser: bool = True,
           allow_lan: bool = False, no_auth: bool = False) -> int:
     host = host or os.environ.get("VIDPIPE_HOST") or "127.0.0.1"
@@ -565,4 +589,8 @@ def serve(host: str | None = None, port: int | None = None, *, open_browser: boo
         print("\n關閉。", file=sys.stderr)
     finally:
         httpd.server_close()
+    if RESTART.is_set():          # POST /api/restart：port 已經放掉，用同樣的參數換成新的行程
+        print("重新啟動…", file=sys.stderr)
+        argv = restart_argv(sys.argv)
+        os.execv(argv[0], argv)
     return 0

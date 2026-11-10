@@ -1,12 +1,5 @@
 [
   {
-    "run_id": "20261110_letting-go_short",
-    "topic": "letting-go",
-    "format": "short",
-    "duration": 48.7,
-    "out": "out/20261110_letting-go_short"
-  },
-  {
     "run_id": "20261110_impermanence_short",
     "topic": "impermanence",
     "format": "short",
@@ -40,5 +33,12 @@
     "format": "short",
     "duration": 84.3,
     "out": "out/20261110_mindfulness_short"
+  },
+  {
+    "run_id": "20261110_letting-go_short",
+    "topic": "letting-go",
+    "format": "short",
+    "duration": 48.7,
+    "out": "out/20261110_letting-go_short"
   }
 ]

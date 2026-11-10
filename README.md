@@ -451,6 +451,7 @@ API（皆為 JSON，錯誤格式同 CLI）：
 |---|---|---|
 | GET | `/api/version` | 版本與 build（公開，給 healthcheck） |
 | GET | `/api/doctor?skip=…` | 等同 `vidpipe doctor` |
+| POST | `/api/restart` | 重新啟動 `vidpipe serve`（同樣的參數，換成新的行程）：`git pull` 之後載入新版用。回 202；進行中的工作是獨立的子行程，不受影響。Docker 裡請改用 `docker restart` |
 | GET | `/api/config` | 生效設定（祕密遮蔽） |
 | GET | `/api/settings` | 設定頁用：每個項目的分組、型別、說明、範圍、預設、現值與**來源**（`env`／`file`／`default`，`locked`＝被環境變數指定）、設定檔路徑／`revision`／可不可寫，以及設定檔的問題。**祕密沒有值**，只有 `is_set`。設定檔壞掉時照樣回 200（`/api/config` 會回 `bad_config`） |
 | PUT | `/api/settings` | 存設定：`{"changes": {"tts_model": "x", "target_lufs": -16, "tts_token": "…"}, "revision": "…"}`；值 `null`＝改回預設（token＝清掉），沒列的項目不動。不合格回 400 `bad_input`，`error.fields` 是 `{項目: 原因}`，**整批都不會存**；被環境變數指定的項目也是 400；`revision` 不是現在的設定檔回 409 `stale_config`（不給就不檢查）；設定檔壞了回 409，`"replace_invalid": true` 才會覆寫（先備份成 `.bak`）；唯讀部署回 403。回傳同 GET，加 `changed` |
