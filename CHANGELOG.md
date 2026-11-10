@@ -35,3 +35,9 @@
 - **改了什麼**：新增 `studio/`（程式、提示詞、主題庫、文件、測試）。`studio/work`、`studio/out` 不進版控；
   `.dockerignore` 排除 `studio`，映像與線上服務不變。`pytest` 多跑 `studio/tests`（離線，假的 vidpipe 與素材池）。
 - **相容性**：`src/vidpipe` 沒有任何改動。
+
+## 字幕與疊字的字級
+
+- **為什麼**：實際在手機上看，黃色標題與白色字幕都偏小。
+- **改了什麼**：`subtitles.size`（`normal`／`large`／`xlarge`）；疊字多一個 `xlarge`，最多折成三行（原本兩行，長標題會被截掉）。
+- **相容性**：沒寫 `size` 的 manifest 字級不變。疊字 `large` 以下的大小不變。
