@@ -41,6 +41,7 @@ BEAT_CHARS = 26                 # 一個鏡頭最多幾個字
 TITLE_CHARS = 20
 MAX_TEXT_CHARS = 1200           # 約 4–5 分鐘；Shorts 用不到這麼長
 MAX_BATCH = 50
+MAX_REPICKS = 4                 # 素材抓不下來時最多重挑幾次
 MAX_NEW_SEARCHES = 3            # 一個主題一次最多再搜幾組新的關鍵字
 MIN_CLIP_SECONDS = 40
 LICENSE_RANK = {"free": 0, "free-attribution": 1, "check": 2, "unknown": 3}
@@ -307,6 +308,27 @@ def record_use(cfg: Config, short_id: str, asset_ids: list[str]) -> None:
     _write(_state_dir(cfg) / "used.json", {k: v for k, v in used.items() if v})
 
 
+def bad_assets(cfg: Config) -> dict[str, str]:
+    """抓不下來的素材（影片下架、地區限制…）→ 原因。挑素材時一律跳過。"""
+    data = _read(_state_dir(cfg) / "bad.json", {})
+    return data if isinstance(data, dict) else {}
+
+
+def ban_asset(cfg: Config, asset_id: str, reason: str = "") -> None:
+    bad = bad_assets(cfg)
+    bad[asset_id] = reason[:200]
+    _write(_state_dir(cfg) / "bad.json", bad)
+
+
+_FETCH_FAILED = re.compile(r"抓不到\s*([a-z]+:[^\s：:]+)")
+
+
+def failed_asset(message: str) -> str | None:
+    """從「vidgrab 抓不到 youtube:xxx：…」這種錯誤訊息取出素材 id。"""
+    m = _FETCH_FAILED.search(message)
+    return m.group(1) if m else None
+
+
 def _unit(*parts: str) -> float:
     return int(hashlib.sha256("|".join(parts).encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
 
@@ -433,15 +455,20 @@ def pick_footage(cfg: Config, short_id: str, beats: list[dict[str, Any]], *,
     client = client or assets.make_client(cfg)
     warnings: list[str] = []
     banned = {a for a, shorts in used_assets(cfg).items() if any(s != short_id for s in shorts)}
+    bad = set(bad_assets(cfg))
+
+    def pool_of(name: str, need: int) -> list[dict[str, Any]]:
+        found = theme_pool(cfg, client, lib, name, need=need + len(bad), banned=banned,
+                           allow_unknown=allow_unknown, warnings=warnings)
+        return [it for it in found if it["id"] not in bad]      # 抓不下來的不再挑
+
     pools: dict[str, list[dict[str, Any]]] = {}
     for theme in sorted({b["theme"] for b in beats}):
         need = min(4, sum(1 for b in beats if b["theme"] == theme))
-        pools[theme] = theme_pool(cfg, client, lib, theme, need=need, banned=banned,
-                                  allow_unknown=allow_unknown, warnings=warnings)
+        pools[theme] = pool_of(theme, need)
         if not pools[theme]:       # 這個主題沒有素材：借用安靜的空鏡，不讓整支片失敗
             for other in lib.get("defaults", []):
-                pools[theme] = theme_pool(cfg, client, lib, other, need=need, banned=banned,
-                                          allow_unknown=allow_unknown, warnings=warnings)
+                pools[theme] = pool_of(other, need)
                 if pools[theme]:
                     warnings.append(f"主題 {theme} 沒有素材，改用 {other}")
                     break
@@ -526,13 +553,27 @@ def run(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = None
     """一筆文案做到成片：分鏡 → 挑素材 → 旁白 → 渲染 → 封面與 credits。"""
     from . import shorts
 
-    jobs.stage("storyboard", "分鏡、挑畫面")
-    built = build(req, cfg, client=client)
-    doc = built["manifest"]
-    store_request(cfg, req)
-    _write(timeline.short_dir(cfg, req["id"]) / REPORT_FILE, built["report"])
-    manifest, effective = shorts.parse_document(doc, cfg)
-    result = shorts.make(manifest, doc, effective, output)
+    dropped: list[str] = []
+    for attempt in range(MAX_REPICKS + 1):
+        jobs.stage("storyboard", "分鏡、挑畫面")
+        built = build(req, cfg, client=client)
+        doc = built["manifest"]
+        store_request(cfg, req)
+        _write(timeline.short_dir(cfg, req["id"]) / REPORT_FILE, built["report"])
+        manifest, effective = shorts.parse_document(doc, cfg)
+        try:
+            result = shorts.make(manifest, doc, effective, output)
+            break
+        except UpstreamError as exc:
+            # 挑到的素材抓不下來（影片下架、地區限制）：記下來、換一支重挑；旁白與做好的場景有快取
+            asset_id = failed_asset(exc.message)
+            if asset_id is None or attempt == MAX_REPICKS:
+                raise
+            ban_asset(cfg, asset_id, exc.message)
+            dropped.append(asset_id)
+            jobs.log(f"{asset_id} 抓不下來，換一支素材重挑", "warning")
+    if dropped:
+        built["report"]["warnings"].append("這些素材抓不下來，已換掉：" + "、".join(dropped))
     record_use(cfg, req["id"], sorted({b["asset_id"] for b in built["report"]["beats"]}))
     result["warnings"] = [*built["report"]["warnings"], *result.get("warnings", [])]
     result["quick"] = {k: built["report"][k] for k in ("chars", "estimated_seconds", "licenses")}

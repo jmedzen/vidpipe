@@ -207,3 +207,23 @@ def test_batch_file_runs_every_item_and_reports_failures_separately(world):
     _, one = footage_of(world.root, "b-1")
     _, two = footage_of(world.root, "b-2")
     assert not set(one) & set(two)
+
+
+def test_footage_that_cannot_be_fetched_is_banned_and_replaced(world):
+    def on_batch(body):                       # 第一支挑到的素材抓不下來
+        if body["asset_ids"][0] == "youtube:1a":
+            return 200, {"schema": "vidgrab.batch/1", "project": body["project"],
+                         "results": [{"asset_id": "youtube:1a", "new_clips": [],
+                                      "error": "ERROR: [youtube] 1a: This video is not available"}]}
+        return world.vg._default_batch(body)
+
+    world.vg.on_batch = on_batch
+    out = world("quick", "--text", "今天很好。", "--id", "retry-1", "--no-music")
+    _, ids = footage_of(world.root, "retry-1")
+    assert "youtube:1a" not in ids and out["output"]["path"].endswith("retry-1.mp4")
+    assert any("抓不下來" in w for w in out["output"]["warnings"])
+    cfg = Config(work_dir=str(world.root / "work"))
+    assert "youtube:1a" in quick.bad_assets(cfg)
+    message = "vidgrab 抓不到 youtube:yrfJRKqJc-w：ERROR: …"
+    assert quick.failed_asset(message) == "youtube:yrfJRKqJc-w"
+    assert quick.failed_asset("tts 連不上") is None

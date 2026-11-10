@@ -334,9 +334,20 @@ class Run:
     def run(self) -> Path:
         brief = self.brief()
         script = self.script(brief)
-        picks = self.visuals(script)
-        self.manifest(script, picks)
-        made = self.make()
+        for attempt in range(quick.MAX_REPICKS + 1):
+            picks = self.visuals(script)
+            self.manifest(script, picks)
+            try:
+                made = self.make()
+                break
+            except vidpipe.VidpipeError as exc:
+                # 挑到的素材抓不下來(影片下架、地區限制):記下來,換一支重挑
+                asset_id = quick.failed_asset(str(exc))
+                if asset_id is None or attempt == quick.MAX_REPICKS:
+                    raise
+                quick.ban_asset(self._vidpipe_cfg(), asset_id, str(exc))
+                (self.dir / "footage.json").unlink(missing_ok=True)
+                self.log(f"素材 {asset_id} 抓不下來,換一支重挑")
         pkg = self.package(script, made)
         report = self.quality(script, made, pkg["description"])
         if not report["ok"]:
