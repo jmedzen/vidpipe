@@ -7,12 +7,14 @@ import { applyTheme, initialTheme } from './lib/theme'
 import { JobDetailPage, JobsPage } from './pages/Jobs'
 import { NewShortPage } from './pages/NewShort'
 import { Overview } from './pages/Overview'
+import { QuickPage } from './pages/Quick'
 import { Settings } from './pages/Settings'
 import { ShortDetailPage, ShortsPage } from './pages/Shorts'
 import type { VersionInfo } from './types'
 
 const NAV: NavItem[] = [
   { id: 'overview', label: '總覽', icon: '◎' },
+  { id: 'quick', label: '文案直出', icon: '✎' },
   { id: 'shorts', label: '作品', icon: '▶' },
   { id: 'jobs', label: '工作', icon: '▤' },
   { id: 'settings', label: '設定', icon: '⚙' },
@@ -37,7 +39,7 @@ function safeDecode(text: string): string {
 
 /**
  * hash 路由：`#/` → overview，`#/jobs`、`#/jobs/<id>`、`#/shorts`、`#/shorts/<id>`、
- * `#/shorts/<id>/<分頁>`、`#/settings`。不認得的一律回總覽。
+ * `#/shorts/<id>/<分頁>`、`#/quick`、`#/quick/batch`、`#/settings`。不認得的一律回總覽。
  */
 function routeFromHash(): Route {
   const [id = '', param = '', sub = ''] = window.location.hash.replace(/^#\/?/, '').split('/')
@@ -81,6 +83,7 @@ export default function App() {
       <main>
         {route.page === 'settings' && <Settings />}
         {route.page === 'new' && <NewShortPage />}
+        {route.page === 'quick' && <QuickPage mode={route.param} />}
         {route.page === 'shorts' && (route.param
           ? <ShortDetailPage key={route.param} id={route.param} tab={route.sub} />
           : <ShortsPage />)}

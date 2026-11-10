@@ -240,26 +240,36 @@ def scenes_of(text: str, lib: dict[str, Any]) -> list[dict[str, Any]]:
     return scenes
 
 
-def pick_theme(text: str, lib: dict[str, Any], *, previous: str | None, index: int) -> str:
-    """旁白裡出現哪個主題的關鍵詞最多就選它；沒對到就輪流用安靜的空鏡。不跟上一個場景一樣。"""
+def pick_theme(text: str, lib: dict[str, Any], *, previous: str | None, index: int,
+               seen: dict[str, int] | None = None) -> str:
+    """旁白裡出現哪個主題的關鍵詞最多就選它；沒對到就輪流用安靜的空鏡。
+
+    不跟上一個場景一樣；這支片已經用過的主題扣分（`seen`），免得整支片都是同一種畫面。
+    """
+    seen = seen or {}
+    names = list(lib["themes"])
     scored = []
     for name, spec in lib["themes"].items():
         hits = sum(len(word) for word in spec.get("keywords", []) if word in text)
         if hits and name != previous:
-            scored.append((-hits, list(lib["themes"]).index(name), name))
-    if scored:
+            scored.append((-(hits - 0.75 * seen.get(name, 0)), names.index(name), name))
+    if scored and min(scored)[0] < 0:
         return min(scored)[2]
-    defaults = [d for d in lib.get("defaults") or list(lib["themes"]) if d != previous]
-    return defaults[index % len(defaults)]
+    defaults = [d for d in lib.get("defaults") or names if d != previous]
+    defaults.sort(key=lambda d: seen.get(d, 0))          # 穩定排序：沒用過的在前
+    return defaults[index % len(defaults)] if not seen else defaults[0]
 
 
 def storyboard(text: str, lib: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """文案 → 鏡頭清單：`id`（s<場景>-<鏡頭>）、`text`、`theme`。"""
     lib = lib or library()
     beats, previous = [], None
+    seen: dict[str, int] = {}
     for i, scene in enumerate(scenes_of(text, lib), 1):
-        theme = scene["theme"] or pick_theme(scene["text"], lib, previous=previous, index=i - 1)
+        theme = scene["theme"] or pick_theme(scene["text"], lib, previous=previous, index=i - 1,
+                                             seen=seen)
         previous = theme
+        seen[theme] = seen.get(theme, 0) + 1
         for j, part in enumerate(split_beats(scene["text"]), 1):
             beats.append({"id": f"s{i}-{j}", "text": part, "theme": theme})
     return beats
