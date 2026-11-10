@@ -189,3 +189,37 @@ def test_measuring_silence_gives_none_and_a_warning_instead_of_a_wild_gain(tmp_p
     plan, _ = build(tmp_path, silent, None, None)
     assert plan.filter == "" and "量不出響度" in plan.warnings[0]
     assert math.isfinite(mix.GAIN_LIMITS[0])
+
+
+def peaky_voice(path):
+    """平均很小聲、但每半秒有一個很高的峰值：真實的 TTS 旁白就是這種樣子。"""
+    import math
+    import struct
+    import wave
+
+    rate, frames = 24000, []
+    for n in range(rate * 6):
+        t = n / rate
+        amp = 0.95 if (t % 0.25) < 0.01 else 0.12
+        frames.append(struct.pack("<h", int(32767 * amp * math.sin(2 * math.pi * 330 * t))))
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(frames))
+    return path
+
+
+def test_peaky_narration_still_reaches_the_target_loudness(tmp_path):
+    # loudnorm 的線性模式遇到峰值會少加增益，成片比目標小聲；要改用限幅器
+    voice = peaky_voice(tmp_path / "peaky.wav")
+    measured = mix.measure(voice)
+    assert measured["tp"] + (-14.0 - measured["i"]) > mix.TRUE_PEAK      # 真的是峰值受限的情況
+    plan, _ = build(tmp_path, voice, None, None, target_lufs=-14.0)
+    assert plan.filter.startswith("volume=") and "alimiter=" in plan.filter
+    assert loudness_after(plan) == pytest.approx(-14.0, abs=1.0)
+    after = tmp_path / "after.wav"
+    import subprocess
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(voice), "-af",
+                    f"{plan.filter},aresample=48000", str(after)], check=True)
+    assert mix.measure(after)["tp"] <= -1.0                              # 峰值有擋住

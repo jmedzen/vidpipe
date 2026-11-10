@@ -96,10 +96,49 @@ def measure(path: str | Path, *, start: float = 0.0, length: float | None = None
     return got if all(math.isfinite(v) for v in got.values()) else None
 
 
-def _normalizer(target: float, m: dict[str, float]) -> str:
-    return (f"loudnorm=I={target:g}:TP={TRUE_PEAK:g}:LRA={LRA:g}:measured_I={m['i']:.2f}:"
-            f"measured_LRA={m['lra']:.2f}:measured_TP={m['tp']:.2f}:"
-            f"measured_thresh={m['thresh']:.2f}:offset={m['offset']:.2f}:linear=true")
+LIMITER_ROUNDS = 3
+LIMITER_MAX_EXTRA = 6.0     # dB：為了補回限幅吃掉的響度，最多多加這麼多增益
+LIMITER_CEILING = -2.0      # dBFS：峰值擋在這裡（取樣峰值；比 TRUE_PEAK 低一點，留給取樣間峰值）
+
+
+def _limited(gain: float) -> str:
+    ceiling = 10 ** (LIMITER_CEILING / 20)
+    return f"volume={gain:.2f}dB,alimiter=limit={ceiling:.4f}:level=false:attack=3:release=50"
+
+
+def _measure_filtered(source: Path, flt: str, timeout: float) -> dict[str, float] | None:
+    """套上濾鏡之後的響度（只跑聲音，不寫檔）。"""
+    args = ["-i", str(source), "-vn", "-af",
+            f"{flt},loudnorm=I=-14:TP={TRUE_PEAK:g}:LRA={LRA:g}:print_format=json",
+            "-f", "null", "-"]
+    blocks = _JSON.findall(ffmpeg.run_stderr(args, timeout=timeout))
+    try:
+        return {"i": float(json.loads(blocks[-1])["input_i"])} if blocks else None
+    except (KeyError, ValueError):
+        return None
+
+
+def _normalizer(target: float, m: dict[str, float], source: Path | None = None,
+                timeout: float = 600.0) -> str:
+    """把量到的響度調到 `target` 的濾鏡。
+
+    峰值夠低時用 loudnorm 的線性模式（單純加增益，不動動態）。旁白這種峰值高、平均小聲的聲音，
+    加到目標響度後峰值會超過上限；loudnorm 的線性模式遇到這種情況會自己少加增益，成片就比目標
+    小聲 1–3 LU。這時改成「加增益，再用限幅器只壓超出的峰值」。限幅本身會吃掉一點響度，
+    所以（有 `source` 時）量一次結果、把差額補回增益，最多三輪，直到離目標 0.3 LU 以內。
+    """
+    gain = target - m["i"]
+    if m["tp"] + gain <= TRUE_PEAK:
+        return (f"loudnorm=I={target:g}:TP={TRUE_PEAK:g}:LRA={LRA:g}:measured_I={m['i']:.2f}:"
+                f"measured_LRA={m['lra']:.2f}:measured_TP={m['tp']:.2f}:"
+                f"measured_thresh={m['thresh']:.2f}:offset={m['offset']:.2f}:linear=true")
+    if source is not None:
+        for _ in range(LIMITER_ROUNDS):
+            got = _measure_filtered(source, _limited(gain), timeout)
+            if got is None or not math.isfinite(got["i"]) or abs(target - got["i"]) <= 0.3:
+                break
+            gain = min(gain + (target - got["i"]), target - m["i"] + LIMITER_MAX_EXTRA)
+    return _limited(gain)
 
 
 # ------------------------------------------------------------------ 混音
@@ -191,6 +230,6 @@ def plan(narration: Path | None, music: Resolved | None, music_cfg: dict[str, An
         if measured is None:
             warnings.append("聲音太短或完全靜音，量不出響度，沒有做標準化")
         else:
-            flt = _normalizer(cfg.target_lufs, measured)
+            flt = _normalizer(cfg.target_lufs, measured, Path(source), timeout)
             info["loudness"] = {"input": round(measured["i"], 1), "target": cfg.target_lufs}
     return AudioPlan(source, flt, info, tuple(warnings))
