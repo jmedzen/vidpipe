@@ -13,6 +13,7 @@ agent 寫（或之後由 `plan` 產生）一份 JSON，`narrate`、`render` 都�
       "scenes": [
         {"id": "s1", "text": "台北的夜晚，從一碗熱湯開始。",
          "clip": {"asset_id": "pixabay:123", "start": 3.0},  // 或 {"path": "...", "start": 0}
+                                                             // path 可加 "license": "own"、"credit"
          "fit": "blur_pad", "focus": "0.5,0.5", "mute_source": true},
         {"id": "s2", "sentences": [{"text": "夜市很熱鬧。", "en": "The market is lively."}]},
         {"id": "s3", "min_duration": 2.0}                  // 沒有旁白的場景要給最短長度
@@ -43,6 +44,8 @@ SCHEMA = "vidpipe.manifest/1"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SUBTITLE_LANGS = ("zh-TW", "zh-TW+en")
 SUBTITLE_STYLES = ("bold-bottom",)
+# 本機檔案（clip.path、music.path）可以宣告的授權：own＝自己做的；其餘兩個同 vidgrab 的分類
+FILE_LICENSES = ("own", "free", "free-attribution")
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,29 @@ def _choice(value: Any, path: str, options: tuple[str, ...]) -> str:
     return str(value)
 
 
+def _file_license(c: dict[str, Any], path: str) -> dict[str, str]:
+    """本機檔案的授權宣告：`license`（own／free／free-attribution）與 `credit`（作者或出處）。
+
+    只有 `path` 才能宣告（vidgrab 的素材由 vidgrab 回報授權）；要標註的一定要寫 `credit`。
+    """
+    out: dict[str, str] = {}
+    for key in ("license", "credit"):
+        if key in c and "path" not in c:
+            raise _fail(f"{path}.{key}", "只有本機檔案（path）才能宣告",
+                        "asset_id 的授權由 vidgrab 回報")
+    if "license" in c:
+        out["license"] = _choice(c["license"], f"{path}.license", FILE_LICENSES)
+    if "credit" in c:
+        out["credit"] = _str(c["credit"], f"{path}.credit")
+        if "license" not in out:
+            raise _fail(f"{path}.credit", "要同時給 license",
+                        f"可用值：{', '.join(FILE_LICENSES)}")
+    if out.get("license") == "free-attribution" and "credit" not in out:
+        raise _fail(f"{path}.license", "free-attribution 要寫 credit（作者與出處）",
+                    '例："credit": "作者（CC BY 4.0）— https://…"')
+    return out
+
+
 # ------------------------------------------------------------------ 解析
 
 def _parse_scene(raw: Any, i: int, *, max_chars: int) -> Scene:
@@ -174,12 +200,15 @@ def _parse_scene(raw: Any, i: int, *, max_chars: int) -> Scene:
                     "例：{\"id\": \"intro\", \"min_duration\": 2.0}")
     clip = None
     if "clip" in data:
-        c = _obj(data["clip"], f"{path}.clip", {"asset_id", "path", "start"})
+        c = _obj(data["clip"], f"{path}.clip", {"asset_id", "path", "start", "license", "credit"})
         if bool("asset_id" in c) == bool("path" in c):
             raise _fail(f"{path}.clip", "asset_id 與 path 要二選一",
                         "asset_id 是 vidgrab 的素材 id；path 是本機檔案")
+        declared = _file_license(c, f"{path}.clip")
         clip = {k: (_str(v, f"{path}.clip.{k}") if k != "start"
-                    else _num(v, f"{path}.clip.start", hi=86400)) for k, v in c.items()}
+                    else _num(v, f"{path}.clip.start", hi=86400))
+                for k, v in c.items() if k not in ("license", "credit")}
+        clip.update(declared)
     fit = _choice(data.get("fit", "blur_pad"), f"{path}.fit", FITS)
     try:
         focus = parse_focus(data.get("focus"))
@@ -224,13 +253,17 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
     music = None
     if "music" in top and top["music"] is not None:
         m = _obj(top["music"], "music",
-                 {"path", "asset_id", "start", "volume", "duck_under_voice"})
+                 {"path", "asset_id", "start", "volume", "duck_under_voice", "license",
+                  "credit"})
         if bool("path" in m) == bool("asset_id" in m):
             raise _fail("music", "path 與 asset_id 要二選一")
+        declared = _file_license(m, "music")
         music = {k: (_str(v, f"music.{k}") if k in ("path", "asset_id")
                      else _num(v, f"music.{k}", hi=2 if k == "volume" else 36000)
                      if k in ("volume", "start")
-                     else _bool(v, "music.duck_under_voice")) for k, v in m.items()}
+                     else _bool(v, "music.duck_under_voice"))
+                 for k, v in m.items() if k not in ("license", "credit")}
+        music.update(declared)
 
     cover = None
     if top.get("cover") is not None:

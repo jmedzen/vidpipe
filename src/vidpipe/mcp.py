@@ -49,6 +49,8 @@ GUIDE_TAIL = """
   也可以是片段 id pixabay:123#2-8）或 `path`（伺服器上的檔案）。
   `start` 是素材的第幾秒；只會向 vidgrab 要 start 起、場景那麼長的一段。
   素材不夠長會循環並在 warnings 提醒。
+  本機檔案（`path`）可加 `license`（own／free／free-attribution）與 `credit`，
+  credits.md 就不會把它標成授權未明。
 - `music`：`volume` 是音樂相對旁白的響度（1 = 一樣大聲，預設 0.3），
   `duck_under_voice` 讓旁白出聲時自動壓低音樂。
 - 成片自動標準化到 -14 LUFS，同時產出封面（`cover.at`、`cover.text`）與素材來源清單 credits.md。

@@ -84,3 +84,20 @@ def test_the_short_summary_counts_assets_and_the_licences_that_need_a_look(tmp_p
     (root / "sources.json").write_text(json.dumps(sources), encoding="utf-8")
     assert shorts.summarize(cfg, "night-01")["credits"] == {
         "assets": 4, "attribution_required": 1, "unclear": 3}
+
+
+def test_a_local_file_with_a_declared_licence_is_not_flagged():
+    own = {"kind": "file", "path": "/a/bg.mp4", "declared_license": "own"}
+    text, summary = build([("s1", own)])
+    assert "自製素材（manifest 宣告）" in text and "⚠️" not in text
+    assert summary == {"assets": 1, "attribution_required": [], "unclear": []}
+
+
+def test_a_local_file_declared_as_attribution_required_lists_its_credit():
+    by = {"kind": "file", "path": "/a/song.mp3", "declared_license": "free-attribution",
+          "declared_credit": "Bob（CC BY 4.0）— https://x/song"}
+    text, summary = build([("s1", {"kind": "file", "path": "/a/c.mp4"})], by)
+    assert "**必須標註**" in text and "Bob（CC BY 4.0）— https://x/song" in text
+    assert "素材來源：" in text
+    assert summary["attribution_required"] == ["/a/song.mp3"]
+    assert summary["unclear"] == ["/a/c.mp4"]      # 沒宣告的本機檔案照舊要確認

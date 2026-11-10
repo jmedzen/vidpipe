@@ -12,10 +12,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+_DECLARED = {"own": "自製素材（manifest 宣告）", "free": "可自由使用（manifest 宣告）",
+             "free-attribution": "可用需標註（manifest 宣告）"}
+
 
 def _license_label(credit: dict[str, Any]) -> tuple[str, str]:
     """(顯示用的授權說明, free／free-attribution／check／unknown／file)。"""
     if credit.get("kind") == "file":
+        declared = credit.get("declared_license")
+        if declared in _DECLARED:      # manifest 寫了 license：照宣告的算，不再標 ⚠️
+            return _DECLARED[declared], "free-attribution" if declared == "free-attribution" \
+                else "free"
         return "本機檔案，授權請自行確認", "file"
     lic = credit.get("license") or {}
     kind = lic.get("kind") or "unknown"
@@ -33,7 +40,7 @@ def _title(credit: dict[str, Any]) -> str:
 
 def _credit_text(credit: dict[str, Any]) -> str:
     """說明欄用的一行：優先用 vidgrab 寫好的 credit_hint。"""
-    hint = credit.get("credit_hint")
+    hint = credit.get("credit_hint") or credit.get("declared_credit")
     if hint:
         return str(hint)
     parts = [credit.get("author") or "", credit.get("webpage_url") or ""]
@@ -44,8 +51,8 @@ def _entry(credit: dict[str, Any], used_in: str) -> str:
     license_text, kind = _license_label(credit)
     flag = "⚠️ " if kind in ("check", "unknown", "file") else ""
     line = f"- 「{_title(credit)}」"
-    if credit.get("author"):
-        line += f"— {credit['author']}"
+    if credit.get("author") or credit.get("declared_credit"):
+        line += f"— {credit.get('author') or credit['declared_credit']}"
     line += f"　授權：{flag}{license_text}"
     if kind == "free-attribution":
         line += "（**必須標註**）"
@@ -82,7 +89,8 @@ def build(short_id: str, title: str, sources: dict[str, Any]) -> tuple[str, dict
         lines += ["這支片沒有用到外部素材。", ""]
 
     everything = [c for c, _ in videos.values()] + ([music] if music else [])
-    hints = list(dict.fromkeys(_credit_text(c) for c in everything if c.get("kind") != "file"))
+    hints = list(dict.fromkeys(_credit_text(c) for c in everything
+                               if c.get("kind") != "file" or c.get("declared_credit")))
     if hints:
         lines += ["## 說明欄範本", "", "```", "素材來源："]
         lines += hints
