@@ -41,3 +41,12 @@
 - **為什麼**：實際在手機上看，黃色標題與白色字幕都偏小。
 - **改了什麼**：`subtitles.size`（`normal`／`large`／`xlarge`）；疊字多一個 `xlarge`，最多折成三行（原本兩行，長標題會被截掉）。
 - **相容性**：沒寫 `size` 的 manifest 字級不變。疊字 `large` 以下的大小不變。
+
+## 文案直出（`vidpipe quick`、`POST /api/quick`）與素材不重複
+
+- **為什麼**：原本從文案到成片要先有人（或 LLM）替每個場景想搜尋關鍵字。使用者希望貼上文案就能做，單筆或整批；
+  也發現連續做幾支片時畫面素材重複率太高。
+- **改了什麼**：新增 `vidpipe.quick`：規則式分鏡、用關鍵詞對應 30 個畫面主題、每個主題一個 vidgrab 素材池、
+  加大的標題與字幕、背景音樂。別的作品用過的素材不再用，不夠就換關鍵字再搜。CLI `vidpipe quick`（單筆、CSV、JSON、JSONL）、
+  HTTP `POST /api/quick` 與 `/api/quick/preview`。`studio/` 改成共用這個模組，不再有自己的一份。
+- **相容性**：既有指令與端點不變；`data/footage.json` 隨套件安裝。

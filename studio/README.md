@@ -15,7 +15,7 @@ topics/topics.json ─→ brief ─→ 腳本(LLM)─→ 規則檢查 ─→ 審
 1. 在 repo 根目錄 `pip install -e ".[dev]"`(`studio/pipeline.json` 預設用 `../.venv/bin/vidpipe`)。
 2. vidgrab 在跑(`http://127.0.0.1:8310`),audio.cpp 在跑而且**已載入模型**(`http://127.0.0.1:8301/health`
    的 `models` 大於 0)。Mac 上要用有 libass 的 ffmpeg(`pipeline.json` 的 `path_prepend`)。
-3. `python3 -m unittest discover -s studio/tests`(或在根目錄跑 `pytest`)確認環境。測試不連網路。
+3. 在根目錄跑 `pytest -q studio/tests` 確認環境。測試不連網路。
 
 ## 用法
 
@@ -26,6 +26,8 @@ cd studio
 ./run batch --count 5 --name week46                # 批次;長度約 4:4:2 分布在 30–60、60–90、90–120 秒
 ./run status                                       # 每個 run 做到哪、在等哪個 LLM 回應
 ```
+
+只有文案、不需要 LLM 寫稿與審稿時,直接用 vidpipe 的文案直出:`vidpipe quick 文案.txt`,或網頁的「文案直出」頁(見根目錄 README)。
 
 - 每個階段的輸入輸出都是 `work/<run_id>/` 底下的檔案,做完的階段不重做。**失敗或中斷後,重跑同一個指令就會接著做**
   (批次用同一個 `--name`)。旁白與已渲染的場景在 vidpipe 那邊也有快取。
@@ -57,6 +59,7 @@ cd studio
 | `series` | 畫面下方的系列名稱 |
 | `visuals.allow_unknown_license` | 是否放行 YouTube 上授權未標示的素材(授權明確的永遠優先) |
 | `music.tracks` | 配樂候選(vidgrab 音樂庫的 asset id,CC BY);每支片依 run id 固定挑一首 |
+| `subtitle_size` | 字幕字級:`normal`、`large`(預設)、`xlarge` |
 | `chars_per_second` | 腳本字數換算秒數(4.2) |
 | `review_max_rounds` | 腳本最多改幾輪 |
 
@@ -69,9 +72,10 @@ cd studio
 - **規則檢查**(`pipeline/textcheck.py`,不靠 LLM):總字數、句長 20 字、禁用的開場與用語、簡體字、出處與標題。
 - **審稿**:`prompts/review.md`,由另一個獨立的 LLM 呼叫執行。硬性問題或任何一項低於 4 分就退回重寫;
   第一版通過但意見超過兩條會多磨一輪;改到最後一輪仍有佛法疑義就停下來交給人(`DOUBTS.json`)。
-- **挑素材**(`pipeline/footage.py`、`assets/footage.json`):每個畫面主題維護一個 vidgrab 素材池。授權明確的優先,
-  同一支片盡量不重複,相鄰鏡頭不用同一段。場景依句子切成「鏡頭」,約 4 到 6 秒換一次畫面。
-- **成片**:組出 manifest(常駐標題與系列名稱用 `overlays`、配樂、`fit: crop`),呼叫 `vidpipe validate` 與 `vidpipe make`。
+- **挑素材**:跟網頁的「文案直出」共用 vidpipe 本體的 `vidpipe.quick`(主題庫在 `src/vidpipe/data/footage.json`)。
+  每個畫面主題向 vidgrab 搜一批素材,授權明確的優先。**別的作品用過的素材不再用**(記在 vidpipe `work_dir/_quick/used.json`),
+  沒用過的不夠就換一組關鍵字再搜。場景依句子切成「鏡頭」,約 4 到 6 秒換一次畫面,相鄰鏡頭不用同一段。
+- **成片**:組出 manifest(加大的常駐標題與系列名稱用 `overlays`、加大的字幕、配樂、`fit: crop`),呼叫 `vidpipe validate` 與 `vidpipe make`。
 - **包裝**:`prompts/package.md` 產出標題候選、摘要、標籤、置頂留言;描述另外併入出處、配樂與畫面素材的標註。
 - **品質檢查**(`pipeline/qc.py`):解析度、編碼、幀率、長度範圍、響度(±1.5 LU)與真峰值、靜音、黑畫面、凍結、
   字幕與旁白起點誤差(< 0.3 秒)、字幕與腳本逐字相同、簡體字、授權、CC BY 標註是否進了描述。硬性項目不過就不出貨。

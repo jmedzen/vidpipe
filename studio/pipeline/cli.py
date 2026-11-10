@@ -6,7 +6,9 @@ import json
 import sys
 from pathlib import Path
 
-from . import config, footage, llm, stages, vidpipe
+from vidpipe.errors import VidpipeError
+
+from . import config, llm, stages, vidpipe
 
 EXIT_NEEDS_LLM = 3
 # 批次的長度分布:約四成 30–60 秒、四成 60–90 秒、兩成 90–120 秒
@@ -32,7 +34,7 @@ def _one(cfg: dict, topic: dict, fmt: str, seconds: int, date: str | None) -> tu
     except stages.Rejected as exc:
         run.log(f"退回:{exc}")
         return "rejected", str(exc)
-    except (vidpipe.VidpipeError, footage.FootageError, llm.LLMError) as exc:
+    except (vidpipe.VidpipeError, VidpipeError, llm.LLMError) as exc:
         run.log(f"失敗:{exc}" + (f"({exc.hint})" if getattr(exc, "hint", "") else ""))
         return "failed", str(exc)
     stages.mark_done(cfg, run, dest, stages.read(dest / "metadata.json")["duration"])

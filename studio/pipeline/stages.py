@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import shutil
 from pathlib import Path
 
-from . import footage, llm, qc, textcheck, vidpipe
+from vidpipe import config as vidpipe_config
+from vidpipe import quick
+
+from . import llm, qc, textcheck, vidpipe
 from .config import abspath
 
 FORMAT_NAME = {"short": "直式 Shorts(9:16)", "long": "橫式長影片(16:9)"}
@@ -72,7 +76,7 @@ class Run:
         self.dir = Path(cfg["work"]) / self.id
         self.dir.mkdir(parents=True, exist_ok=True)
         self.root = Path(cfg["root"])
-        self.library = footage.load_library(self.root / "assets" / "footage.json")
+        self.library = quick.library()       # 畫面主題與搜尋關鍵字在 vidpipe 本體（文案直出共用）
         self.logfile = self.dir / "run.log"
 
     def log(self, message: str) -> None:
@@ -172,35 +176,30 @@ class Run:
         """場景切成鏡頭(每個鏡頭一段畫面)。id 是 s<場景>-<鏡頭>。"""
         out = []
         for i, sc in enumerate(textcheck.flatten(script), 1):
-            for j, text in enumerate(textcheck.split_beats(sc["text"]), 1):
+            for j, text in enumerate(quick.split_beats(sc["text"]), 1):
                 out.append({"id": f"s{i}-{j}", "text": text, "visual": sc["visual"]})
         return out
 
     # ---- 5 畫面
-    def visuals(self, script: dict, banned: set[str] | None = None) -> list[dict]:
+    def _vidpipe_cfg(self):
+        """vidpipe 的設定（素材池與「用過的素材」記在它的 work_dir 底下）。"""
+        os.environ.update(vidpipe._env(self.cfg))
+        return vidpipe_config.load()
+
+    def visuals(self, script: dict) -> list[dict]:
         out = self.dir / "footage.json"
-        if out.is_file() and not banned:
+        if out.is_file():
             return read(out)
-        cps = self.cfg["chars_per_second"]
-        want = [{"id": b["id"], "visual": b["visual"],
-                 "seconds": textcheck.chars(b["text"]) / cps + 2.0} for b in self.beats(script)]
-        vcfg = self.cfg["visuals"]
-        vg = footage.Vidgrab(self.cfg["vidpipe"]["env"]["VIDPIPE_VIDGRAB_URL"])
-        pools = {}
-        for theme in sorted({w["visual"] for w in want}):
-            pools[theme] = footage.pool(vg, self.library, theme,
-                                        Path(self.cfg["work"]) / "_footage",
-                                        allow_unknown=vcfg.get("allow_unknown_license", False))
-            if not pools[theme]:        # 這個主題沒有素材:借用相近的主題,不讓整支片失敗
-                for other in self.library.get("fallback", ["sky", "river", "mountain", "leaves"]):
-                    pools[theme] = footage.pool(
-                        vg, self.library, other, Path(self.cfg["work"]) / "_footage",
-                        allow_unknown=vcfg.get("allow_unknown_license", False))
-                    if pools[theme]:
-                        self.log(f"素材池 {theme} 是空的,改用 {other}")
-                        break
-            self.log(f"素材池 {theme}:{len(pools[theme])} 支")
-        picks = footage.assign(want, pools, self.id, banned)
+        beats = [{"id": b["id"], "text": b["text"], "theme": b["visual"]}
+                 for b in self.beats(script)]
+        picks, warnings = quick.pick_footage(
+            self._vidpipe_cfg(), self.short_id, beats,
+            allow_unknown=self.cfg["visuals"].get("allow_unknown_license", False))
+        for message in warnings:
+            self.log(f"素材:{message}")
+        kinds = [(p["item"].get("license") or {}).get("kind") for p in picks]
+        counts = "、".join(f"{k} {kinds.count(k)}" for k in sorted(set(kinds), key=str))
+        self.log(f"素材 {len(picks)} 段:{counts}")
         write(out, picks)
         return picks
 
@@ -214,11 +213,12 @@ class Run:
         m = {"schema": "vidpipe.manifest/1", "id": self.short_id, "title": script["title"],
              "output": {"aspect": "16:9" if self.fmt == "long" else "9:16", "fps": 30},
              "voice": self.cfg["voice"], "timing": self.cfg["timing"], "scenes": scenes,
-             "subtitles": {"langs": "zh-TW", "burn_in": True},
+             "subtitles": {"langs": "zh-TW", "burn_in": True,
+                           "size": self.cfg.get("subtitle_size", "large")},
              "cover": {"text": script["title"]}}
         if self.cfg.get("overlays", True):      # 常駐標題與系列名稱(vidpipe 的 overlays)
             if self.fmt == "short":
-                m["overlays"] = [{"text": script["title"], "position": "top", "size": "large",
+                m["overlays"] = [{"text": script["title"], "position": "top", "size": "xlarge",
                                   "color": "yellow"},
                                  {"text": self.cfg["series"], "position": "bottom",
                                   "size": "small"}]
@@ -228,7 +228,7 @@ class Run:
         music = self.cfg.get("music")
         if music and music.get("tracks"):       # 每支片固定挑一首(依 run id),重跑不會換
             tracks = music["tracks"]
-            pick = tracks[int(footage._unit(self.id, "music") * len(tracks)) % len(tracks)]
+            pick = tracks[int(quick._unit(self.id, "music") * len(tracks)) % len(tracks)]
             m["music"] = {"asset_id": pick, "start": music.get("start", 0),
                           "volume": music.get("volume", 0.22),
                           "duck_under_voice": music.get("duck_under_voice", True)}
@@ -334,11 +334,7 @@ class Run:
     def run(self) -> Path:
         brief = self.brief()
         script = self.script(brief)
-        banned: set[str] = set()
-        ban_file = self.dir / "banned.json"
-        if ban_file.is_file():
-            banned = set(read(ban_file))
-        picks = self.visuals(script, banned or None)
+        picks = self.visuals(script)
         self.manifest(script, picks)
         made = self.make()
         pkg = self.package(script, made)
@@ -346,6 +342,9 @@ class Run:
         if not report["ok"]:
             raise Rejected(f"品質檢查硬性失敗:{report['hard_fail']}(見 {self.dir / 'qc.json'})")
         dest = self.export(script, made, pkg, report)
+        # 記下這支片用了哪些素材:之後的片(包含網頁的文案直出)不會再用到它們
+        quick.record_use(self._vidpipe_cfg(), self.short_id,
+                         sorted({p["asset_id"] for p in picks}))
         self.log(f"完成:{dest}")
         return dest
 

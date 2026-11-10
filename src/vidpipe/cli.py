@@ -214,6 +214,45 @@ def cmd_plan(args: argparse.Namespace) -> int:
                      summary=planner.summarize, short_id=req.manifest.id)
 
 
+def cmd_quick(args: argparse.Namespace) -> int:
+    """文案 → 成片，不需要 LLM。單筆（.txt 或一個 JSON 物件）或批次（JSON 清單、JSONL、CSV）。"""
+    from . import quick
+
+    cfg = config_mod.load()
+    text = args.text if args.text else _read_script(args)
+    name = "" if args.text else str(args.script or "")
+    options = {k: v for k, v in (("id", args.id), ("title", args.title),
+                                 ("series", args.series)) if v}
+    if args.no_music:
+        options["music"] = False
+    if args.only_clear_license:
+        options["allow_unknown_license"] = False
+    suffix = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    head = text.lstrip("\ufeff").lstrip()[:1]
+    if suffix in ("csv", "jsonl") or head == "[" or (suffix == "json" and head != "{"):
+        reqs = [{**r, **{k: v for k, v in options.items() if k != "id"}}
+                for r in quick.parse_batch(text, fmt=suffix if suffix != "json" else "json")]
+        return _recorded("quick-batch", {"items": len(reqs), "ids": [r["id"] for r in reqs]},
+                         lambda: quick.run_batch(reqs, cfg),
+                         summary=lambda o: {k: o[k] for k in ("total", "done", "failed")})
+    doc = json.loads(text) if head == "{" else {"text": text}
+    if isinstance(doc, dict) and isinstance(doc.get("items"), list):
+        reqs = quick.parse_batch(doc)
+        return _recorded("quick-batch", {"items": len(reqs), "ids": [r["id"] for r in reqs]},
+                         lambda: quick.run_batch(reqs, cfg),
+                         summary=lambda o: {k: o[k] for k in ("total", "done", "failed")})
+    req = quick.parse_request({**doc, **options})
+    if args.dry_run:
+        emit({"ok": True, **quick.build(req, cfg)})
+        return 0
+    return _recorded(
+        "quick", {"id": req["id"], "title": req["title"], "chars": quick.chars(req["text"])},
+        lambda: quick.run(req, cfg, output=args.output),
+        summary=lambda o: {k: o[k] for k in ("short_id", "path", "duration", "size_bytes",
+                                             "warnings")},
+        short_id=req["id"])
+
+
 def cmd_credits(args: argparse.Namespace) -> int:
     from . import render
 
@@ -394,6 +433,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("manifest", help="manifest JSON 檔")
     p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.mp4")
     p.set_defaults(func=cmd_make)
+
+    p = sub.add_parser("quick", help="文案直出：一段文案（或一批 CSV／JSON）→ 成片，不需要 LLM")
+    p.add_argument("script", nargs="?",
+                   help="文案 .txt、單筆 .json、批次 .json／.jsonl／.csv；- 讀 stdin")
+    p.add_argument("--text", help="直接給文案（不讀檔）")
+    p.add_argument("--id", help="作品 id（單筆；不給就用日期加文案雜湊）")
+    p.add_argument("--title", help="畫面上方的常駐標題（不給就用第一句）")
+    p.add_argument("--series", help="畫面下方的系列名稱")
+    p.add_argument("--no-music", action="store_true", help="不放背景音樂")
+    p.add_argument("--only-clear-license", action="store_true",
+                   help="只用授權明確的素材（預設也放行授權未標示的，credits 會標出來）")
+    p.add_argument("--dry-run", action="store_true", help="只分鏡與挑素材，回 manifest，不做成片")
+    p.add_argument("-o", "--output", help="輸出檔（單筆），預設 <out_dir>/<id>.mp4")
+    p.set_defaults(func=cmd_quick)
 
     p = sub.add_parser("plan", help="草稿（場景可以只寫 query）→ 搜尋並挑素材與音樂 → manifest")
     p.add_argument("script", help="草稿 .json，或純文字腳本（空白行隔開場景）；- 讀 stdin")

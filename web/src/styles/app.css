@@ -575,3 +575,8 @@ button.link:hover:not(:disabled) { color: var(--text); border-color: transparent
 }
 /* muted 段落裡的 code：Mist 的 --muted 放在 code 底色上只有 4.2:1 */
 .muted code { color: var(--muted-text); }
+
+/* 文案直出：分鏡預覽 */
+.quick-preview { margin-top: 14px; overflow-x: auto; }
+.quick-preview table.grid td:first-child { white-space: nowrap; }
+.form-actions button + button { margin-left: 2px; }

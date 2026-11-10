@@ -13,9 +13,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from pipeline import cli, config, footage, llm, stages, textcheck  # noqa: E402
+from pipeline import cli, config, llm, stages, textcheck  # noqa: E402
 
-THEMES = set(json.loads((ROOT / "assets" / "footage.json").read_text(encoding="utf-8"))["themes"])
+from vidpipe import quick  # noqa: E402
+
+THEMES = set(quick.library()["themes"])
 FIXTURES = json.loads((Path(__file__).parent / "fixtures.json").read_text(encoding="utf-8"))
 SCRIPT, REVIEW, PACKAGE = FIXTURES["script"], FIXTURES["review"], FIXTURES["package"]
 LONG_SCENE = FIXTURES["long_scene"]
@@ -26,7 +28,7 @@ class TextCheck(unittest.TestCase):
         self.assertEqual(textcheck.normalize("為什麼,越想放下?"), "為什麼，越想放下？")
 
     def test_split_beats_cuts_at_sentence_ends(self):
-        beats = textcheck.split_beats(LONG_SCENE)
+        beats = quick.split_beats(LONG_SCENE)
         self.assertEqual(len(beats), 2)
         self.assertEqual("".join(beats), LONG_SCENE)
 
@@ -51,36 +53,6 @@ class TextCheck(unittest.TestCase):
         self.assertEqual(textcheck.simplified_found(text), [])
 
 
-class Footage(unittest.TestCase):
-    def test_assign_prefers_clear_licences_and_avoids_back_to_back_repeats(self):
-        def item(i, kind, dur=300):
-            return {"id": i, "duration": dur, "license": {"kind": kind}, "title": i}
-        pools = {"sky": [item("y:by1", "free-attribution"), item("y:by2", "free-attribution"),
-                         item("y:unk", "unknown")],
-                 "sand": [item("y:only", "unknown", 80)]}
-        scenes = [{"id": f"s{i}", "visual": v, "seconds": 6}
-                  for i, v in enumerate(["sky", "sky", "sky", "sand", "sand"])]
-        picks = footage.assign(scenes, pools, "run")
-        ids = [p["asset_id"] for p in picks]
-        self.assertNotIn("y:unk", ids)
-        self.assertNotEqual(ids[0], ids[1])
-        self.assertEqual(ids[3:], ["y:only", "y:only"])
-        self.assertGreaterEqual(abs(picks[3]["start"] - picks[4]["start"]), 4)
-        for p in picks:
-            self.assertLess(p["start"] + 6, p["item"]["duration"])
-        self.assertEqual(picks, footage.assign(scenes, pools, "run"))       # 可重現
-        with self.assertRaises(footage.FootageError):
-            footage.assign(scenes, pools, "run", banned={"y:only"})
-
-    def test_usable_filters_titles_and_licences(self):
-        ok = {"title": "Ocean waves", "duration": 120, "license": {"kind": "free-attribution"}}
-        self.assertTrue(footage.usable(ok, ["podcast"], False))
-        self.assertFalse(footage.usable({**ok, "title": "Sleep Podcast"}, ["podcast"], False))
-        self.assertFalse(footage.usable({**ok, "license": {"kind": "unknown"}}, [], False))
-        self.assertTrue(footage.usable({**ok, "license": {"kind": "unknown"}}, [], True))
-        self.assertFalse(footage.usable({**ok, "duration": 10}, [], True))
-
-
 class LLMFiles(unittest.TestCase):
     def test_files_backend_waits_for_a_response_file(self):
         os.environ["PIPELINE_LLM"] = "files"
@@ -102,15 +74,20 @@ class EndToEnd(unittest.TestCase):
         self.cfg["vidpipe"] = {"bin": str(ROOT / "tests" / "fake_vidpipe.py"), "timeout": 300,
                                "env": {"VIDPIPE_VIDGRAB_URL": "http://127.0.0.1:1"}}
         self.cfg["music"] = None
-        self._pool = footage.pool
-        footage.pool = lambda vg, lib, theme, cache, **kw: [
-            {"id": "youtube:a1", "title": "Clip", "author": "Alice", "duration": 300,
-             "license": {"kind": "free-attribution"}, "webpage_url": "https://example.com/a1"}]
+        self._pick, self._record = quick.pick_footage, quick.record_use
+        clip = {"id": "youtube:a1", "title": "Clip", "author": "Alice", "duration": 300,
+                "license": {"kind": "free-attribution"}, "webpage_url": "https://example.com/a1"}
+        quick.pick_footage = lambda cfg, sid, beats, **kw: (
+            [{"scene": b["id"], "asset_id": "youtube:a1", "start": 10.0 + 9 * i, "item": clip}
+             for i, b in enumerate(beats)], [])
+        self.recorded = []
+        quick.record_use = lambda cfg, sid, ids: self.recorded.append((sid, ids))
         self._done = stages.done_file
         stages.done_file = lambda cfg: self.tmp / "done.json"
 
     def tearDown(self):
-        footage.pool, stages.done_file = self._pool, self._done
+        quick.pick_footage, quick.record_use = self._pick, self._record
+        stages.done_file = self._done
         shutil.rmtree(self.tmp, ignore_errors=True)
         for key in ("PIPELINE_WORK", "PIPELINE_OUT", "FAKE_SCENE_SECONDS"):
             os.environ.pop(key, None)
@@ -141,6 +118,7 @@ class EndToEnd(unittest.TestCase):
         self.assertGreater(len(manifest["scenes"]), len(SCRIPT["scenes"]))
         self.assertIn("example.com/a1", (dest / "description.txt").read_text(encoding="utf-8"))
         self.assertEqual(json.loads((self.tmp / "done.json").read_text())[0]["topic"], "letting-go")
+        self.assertEqual(self.recorded, [("letting-go-short-20260101", ["youtube:a1"])])
 
     def test_a_too_short_video_is_rejected_by_quality_checks(self):
         os.environ["FAKE_SCENE_SECONDS"] = "1"

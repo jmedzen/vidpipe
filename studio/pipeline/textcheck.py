@@ -3,21 +3,15 @@ from __future__ import annotations
 
 import re
 
+from vidpipe import quick
+
 PUNCT = re.compile(r"[\s，。！？；：、「」『』（）《》〈〉…—\-,.!?;:'\"()]+")
 SENT_END = re.compile(r"[。！？!?；;…\n]+")
 BANNED_OPENERS = ("大家好", "今天我們來聊", "今天要跟大家", "哈囉", "嗨大家", "歡迎來到",
                   "歡迎回到")
 BANNED_PHRASES = ("保證", "一定會好運", "靈驗", "消災解厄", "業障消除", "趕快訂閱", "按讚訂閱",
                   "捐款", "供養金", "報應就會", "不信的話")
-_FULLWIDTH = str.maketrans({",": "，", "?": "？", "!": "！", ":": "：", ";": "；", "(": "（",
-                             ")": "）"})
-
-
-def normalize(text: str) -> str:
-    """旁白與標題的標點一律全形(字幕直接顯示這些字);句點只在中文後面才換。"""
-    text = text.translate(_FULLWIDTH)
-    text = re.sub(r"(?<=[\u4e00-\u9fff])\.(?=\s|$|[\u4e00-\u9fff])", "。", text)
-    return re.sub(r"\s+", "", text) if re.search(r"[\u4e00-\u9fff]", text) else text
+normalize = quick.normalize      # 標點轉全形(跟文案直出同一套)
 
 
 def normalize_script(script: dict) -> dict:
@@ -32,29 +26,6 @@ def normalize_script(script: dict) -> dict:
         if isinstance(group.get("title"), str):
             group["title"] = normalize(group["title"])
     return script
-
-
-def split_beats(text: str, max_chars: int = 26) -> list[str]:
-    """一個場景的旁白 → 幾個「鏡頭」:在句子邊界切,每段盡量不超過 max_chars 字。
-
-    成片每個鏡頭換一次畫面,所以這決定了剪接的節奏(約 4 到 6 秒一刀)。
-    """
-    parts = [p for p in re.findall(r"[^。！？!?；;…]+[。！？!?；;…」』）]*", text) if chars(p)]
-    if not parts:
-        return [text]
-    beats, cur = [], ""
-    for part in parts:
-        if cur and chars(cur) + chars(part) > max_chars:
-            beats.append(cur)
-            cur = part
-        else:
-            cur += part
-    if cur:
-        if beats and chars(cur) < 7:      # 太短的尾巴併回前一段,免得畫面閃一下
-            beats[-1] += cur
-        else:
-            beats.append(cur)
-    return beats
 
 
 def chars(text: str) -> int:

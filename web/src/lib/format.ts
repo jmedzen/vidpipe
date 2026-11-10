@@ -45,9 +45,13 @@ export const KIND_TEXT: Record<string, string> = {
   cover: '封面',
   credits: '素材清單',
   plan: '挑素材',
+  quick: '文案直出',
+  'quick-batch': '文案直出（批次）',
 }
 
 const STAGE_TEXT: Record<string, string> = {
+  storyboard: '分鏡',
+  item: '批次進度',
   encode: '編碼',
   trim: '裁切',
   loop: '循環補長',
@@ -160,4 +164,6 @@ export const RUNNING_TEXT: Record<string, string> = {
   cover: '正在做封面',
   credits: '正在整理素材清單',
   plan: '正在挑素材',
+  quick: '正在把文案做成片',
+  'quick-batch': '正在整批做成片',
 }

@@ -336,6 +336,11 @@ class Handler(BaseHTTPRequestHandler):
             elif self.command == "POST" and route == "/api/validate":
                 manifest, _ = shorts_mod.parse_document(self._manifest_doc())
                 self._json({"ok": True, **shorts_mod.describe(manifest)})
+            elif self.command == "POST" and route == "/api/quick":
+                self._json({"ok": True, **shorts_mod.launch_quick(config_mod.load(),
+                                                                  self._body())}, 202)
+            elif self.command == "POST" and route == "/api/quick/preview":
+                self._json({"ok": True, **shorts_mod.quick_preview(self._body())})
             elif self.command == "POST" and len(parts) == 2 and parts[0] == "api" \
                     and parts[1] in shorts_mod.OPS:
                 self._start(parts[1])
