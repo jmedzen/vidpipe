@@ -161,6 +161,11 @@ agent 寫一份 JSON，`validate`／`narrate`／`render` 都只讀它；同一�
 - 旁白給 `text`（自動分句）或 `sentences`（明確列出每一句；雙語字幕要配英文時用），兩個擇一。
   沒有旁白的場景要給 `min_duration`（秒，最長 120）。
 - `voice` 寫了就蓋過設定檔與環境變數（寫空字串 = 明確要伺服器預設）；`subtitles` 沒寫的欄位用設定檔的 `subtitle_langs`／`burn_subtitles`。
+- **常駐疊字**（`overlays`，選填，最多 4 個）：整支片都在畫面上的文字，例如上方的標題問題、下方的系列名稱。
+  每個是 `{"text": …, "position": "top"｜"bottom", "size": "large"｜"medium"｜"small", "color": "white"｜"yellow"}`
+  （只有 `text` 必填，最長 40 字，太長自動折成兩行）。疊字跟字幕一起燒進畫面，所以要有旁白而且
+  `subtitles.burn_in` 為 true，否則不畫並在 `warnings` 提醒；不會進 `.srt`，封面也不帶疊字。
+  直式放在離上緣 9%／離下緣 11.5%（字幕下方、避開 Shorts 介面），橫式是 5%／2%。
 - **不認得的欄位一律報錯**（多半是打錯字），訊息帶路徑與可用欄位，例如 `manifest scenes[1]：不認得的欄位 txt`。
 - 每個場景的 `clip` 擇一給 `asset_id`（vidgrab 的素材 id）或 `path`（本機檔案）；素材怎麼取得與裁切見下面的 `render`。
 - **本機檔案可以宣告授權**：`clip` 與 `music` 用 `path` 時可加 `"license"`（`own`＝自己做的、`free`＝可自由使用、

@@ -284,9 +284,12 @@ def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
     clips = narration.synthesize(texts, cfg) if texts else []
     jobs.stage("timeline", f"{len(manifest.scenes)} 個場景")
     timeline = build(manifest, clips)
-    subs = subtitles.build(timeline, manifest.subtitles, manifest.output, cfg.subtitle_font) \
-        if texts else None
+    subs = subtitles.build(timeline, manifest.subtitles, manifest.output, cfg.subtitle_font,
+                           manifest.overlays) if texts else None
     warnings = [*timeline.warnings, *(subs.warnings if subs else ())]
+    if manifest.overlays and (subs is None or not manifest.subtitles.burn_in):
+        warnings.append("overlays 沒有畫上去：疊字跟字幕一起燒進畫面，"
+                        "需要有旁白而且 subtitles.burn_in 為 true")
     for message in warnings:
         jobs.log(message, "warning")
 
