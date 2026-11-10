@@ -17,3 +17,10 @@ web/node_modules/
 
 # 本機環境設定（含 token）
 .env
+
+# studio（選題→腳本→審稿→成片→包裝）的中間檔、成品與參考素材
+studio/work/
+studio/out/
+studio/logs/
+studio/assets/reference/
+studio/assets/cache/

@@ -13,3 +13,4 @@ tools
 .env
 .env.*
 !.env.example
+studio
