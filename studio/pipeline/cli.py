@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import sys
 from pathlib import Path
@@ -59,7 +60,9 @@ def cmd_batch(args, cfg: dict) -> int:
         topics = [t for t in stages.load_topics(cfg) if t["id"] not in done][: args.count]
         plan = [{"topic": t["id"], "format": args.format,
                  "seconds": 480 if args.format == "long" else BATCH_SECONDS[i % len(BATCH_SECONDS)],
-                 "date": args.date} for i, t in enumerate(topics)]
+                 # 日期寫進計畫:隔天續跑同一批,還是接著同一組 run,不會另開新的
+                 "date": args.date or dt.date.today().strftime("%Y%m%d")}
+                for i, t in enumerate(topics)]
         stages.write(plan_file, plan)
     results = []
     for item in plan:     # 一支失敗不影響其他支;重跑同一個指令只補沒做完的

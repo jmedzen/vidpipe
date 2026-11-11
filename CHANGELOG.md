@@ -56,3 +56,9 @@
 - **為什麼**：本機用 `nohup` 起的 `vidpipe serve` 在 `git pull` 之後要重啟才會載入新版，原本得到終端機找行程。
 - **改了什麼**：`POST /api/restart` 回 202 之後停掉伺服器，用同樣的參數（加上 `--no-open`）重新執行自己。
   跟其他寫入類端點一樣受 token、Host 與 Origin 檢查保護。
+
+## 抓不下來的素材自動換掉
+
+- **為什麼**：重做 6 支 Shorts 時，有 3 支因為同一支 YouTube 素材已經下架（`This video is not available`）而整支失敗。
+- **改了什麼**：`vidpipe quick` 與 `studio` 遇到「vidgrab 抓不到 <素材>」時，把那支素材記進 `work_dir/_quick/bad.json`、
+  換一支重挑再做（最多 4 次）；之後所有作品都不會再挑到它。`studio batch` 把日期寫進批次計畫，隔天續跑仍接著同一組 run。
