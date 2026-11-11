@@ -364,7 +364,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     try:
         return server.serve(args.host, args.port, open_browser=not args.no_open,
-                            allow_lan=args.allow_lan, no_auth=args.no_auth)
+                            allow_lan=args.allow_lan, no_auth=args.no_auth, watch=args.watch)
     except OSError as exc:  # port 被占用之類
         raise VidpipeError(f"伺服器起不來：{exc}",
                            hint="換一個 --port，或確認沒有重複啟動") from exc
@@ -524,6 +524,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="允許綁非本機位址（Docker 裡必須；同時要設 VIDPIPE_API_TOKEN）")
     p.add_argument("--no-auth", action="store_true",
                    help="綁非本機位址也不要 token（外層已有保護時才用）")
+    p.add_argument("--watch", action="store_true",
+                   help="程式碼更新（例如 git pull）後自動重新啟動（或 VIDPIPE_WATCH=1）；"
+                        "跑到一半的工作不受影響")
     p.set_defaults(func=cmd_serve)
 
     sub.add_parser("mcp", help="MCP server（stdio）：給 Claude Code 等 client 以子行程啟動"
