@@ -18,6 +18,7 @@ const CHECK_LABELS: Record<string, string> = {
   tts_speak: '試合成一句',
   dir_work: 'work 目錄',
   dir_out: 'out 目錄',
+  voices: '參考音檔資料夾',
 }
 
 export interface TestAction {
@@ -98,7 +99,7 @@ export function TestPanel({ actions, values, blocked, extra }: Props) {
                     <StatusDot level={lv} />
                     <div>
                       <div className="check-name">
-                        {CHECK_LABELS[c.name] ?? c.name}
+                        {CHECK_LABELS[c.name] ?? c.name.replace(/^voice:/, '')}
                         {!c.required && <span className="tag">選用</span>}
                       </div>
                       {c.detail && <div className="detail">{c.detail}</div>}

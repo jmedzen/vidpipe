@@ -253,6 +253,28 @@ def cmd_quick(args: argparse.Namespace) -> int:
         short_id=req["id"])
 
 
+def cmd_voices(args: argparse.Namespace) -> int:
+    """參考音檔資料夾：列出音檔與逐字稿；--transcribe 用 audio.cpp 的 ASR 補上沒有的。"""
+    from . import voices
+
+    cfg = config_mod.load()
+    if args.dir:
+        from dataclasses import replace
+
+        cfg = replace(cfg, voice_ref_dir=args.dir)
+    if args.model:
+        from dataclasses import replace
+
+        cfg = replace(cfg, asr_model=args.model)
+    if not args.transcribe:
+        emit({"ok": True, "dir": cfg.voice_ref_dir, "items": voices.scan(cfg)})
+        return 0
+    return _recorded("voices", {"dir": cfg.voice_ref_dir, "model": cfg.asr_model},
+                     lambda: voices.transcribe_missing(cfg),
+                     summary=lambda o: {k: o[k] for k in ("dir", "existing", "transcribed",
+                                                          "failed")})
+
+
 def cmd_credits(args: argparse.Namespace) -> int:
     from . import render
 
@@ -433,6 +455,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("manifest", help="manifest JSON 檔")
     p.add_argument("-o", "--output", help="輸出檔，預設 <out_dir>/<id>.mp4")
     p.set_defaults(func=cmd_make)
+
+    p = sub.add_parser("voices",
+                       help="參考音檔資料夾：列出音檔與逐字稿；--transcribe 用 ASR 補上沒有的")
+    p.add_argument("--dir", help="資料夾（預設用設定的 voice_ref_dir）")
+    p.add_argument("--model", help="ASR 模型 id（預設用設定的 asr_model）")
+    p.add_argument("--transcribe", action="store_true",
+                   help="沒有逐字稿（同名 .txt）的用 audio.cpp 的 ASR 辨識，存回同一個資料夾")
+    p.set_defaults(func=cmd_voices)
 
     p = sub.add_parser("quick", help="文案直出：一段文案（或一批 CSV／JSON）→ 成片，不需要 LLM")
     p.add_argument("script", nargs="?",

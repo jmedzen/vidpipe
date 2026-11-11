@@ -151,6 +151,12 @@ def check_tts(client: TTSClient, wanted_model: str = "",
     return _check("tts", True, f"已載入：{', '.join(ids)}")
 
 
+def _resolved(cfg: Config) -> Config:
+    from . import voices
+
+    return voices.resolve(cfg)
+
+
 def check_voice_ref(cfg: Config) -> Check:
     """音色參考音檔。路徑是 TTS 伺服器那台機器上的，這裡只能在同一台機器時驗證。"""
     if not cfg.voice_ref:
@@ -183,7 +189,7 @@ def run(cfg: Config, skip: Iterable[str] = (),
         ("dirs", lambda: check_dirs(cfg)),
         ("vidgrab", lambda: check_vidgrab(make_vg())),
         ("tts", lambda: check_tts(make_tts(), cfg.tts_model)),
-        ("voice_ref", lambda: check_voice_ref(cfg)),
+        ("voice_ref", lambda: check_voice_ref(_resolved(cfg))),
     ]
     checks = [fn() for name, fn in plan if name not in skip]
     ok = all(c["ok"] for c in checks if c["required"])

@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "requests>=2.28",
+    "opencc-python-reimplemented>=0.1.7",   # ASR 的逐字稿轉成台灣繁體（純 Python）
 ]
 
 [project.optional-dependencies]

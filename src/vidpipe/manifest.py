@@ -334,5 +334,10 @@ _VOICE_FIELDS = {"model": "tts_model", "voice_ref": "voice_ref", "reference_text
 
 
 def apply_voice(manifest: Manifest, cfg: Config) -> Config:
-    """manifest 的 `voice` 蓋過設定檔；寫了就算（空字串 = 明確要伺服器預設）。"""
-    return replace(cfg, **{_VOICE_FIELDS[k]: v for k, v in manifest.voice.items()})
+    """manifest 的 `voice` 蓋過設定檔；寫了就算（空字串 = 明確要伺服器預設）。
+
+    參考音檔只寫檔名時到 `voice_ref_dir` 找、逐字稿沒填時讀同名 `.txt`（見 `voices.resolve`）。
+    """
+    from . import voices
+
+    return voices.resolve(replace(cfg, **{_VOICE_FIELDS[k]: v for k, v in manifest.voice.items()}))
