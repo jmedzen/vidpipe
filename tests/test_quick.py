@@ -227,3 +227,28 @@ def test_footage_that_cannot_be_fetched_is_banned_and_replaced(world):
     message = "vidgrab 抓不到 youtube:yrfJRKqJc-w：ERROR: …"
     assert quick.failed_asset(message) == "youtube:yrfJRKqJc-w"
     assert quick.failed_asset("tts 連不上") is None
+
+
+def test_footage_with_burned_in_text_is_banned_and_replaced(world, monkeypatch):
+    calls = []
+
+    def fake_scan(video, timeline_doc, env=None):
+        calls.append(video)
+        if len(calls) == 1:                       # 第一次：第一個場景有浮水印
+            return [{"scene": timeline_doc["scenes"][0]["id"], "words": ["pond5", "Exclusive"]}]
+        return []
+
+    monkeypatch.setattr(quick.ocr, "scenes_with_text", fake_scan)
+    out = world("quick", "--text", "今天很好。", "--id", "wm-1", "--no-music")
+    _, ids = footage_of(world.root, "wm-1")
+    cfg = Config(work_dir=str(world.root / "work"))
+    banned = quick.bad_assets(cfg)
+    assert len(calls) == 2 and len(banned) == 1 and not set(banned) & set(ids)
+    assert "畫面有文字" in next(iter(banned.values())) and "pond5" in next(iter(banned.values()))
+    assert any("畫面有文字" in w for w in out["output"]["warnings"])
+
+
+def test_ocr_flags_only_clearly_readable_text():
+    assert quick.ocr.suspicious(["Download", "4K"]) and quick.ocr.suspicious(["descriptions"])
+    assert not quick.ocr.suspicious([]) and not quick.ocr.suspicious(["ok"])
+    assert quick.ocr.scenes_with_text("x.mp4", {"scenes": []}) in (None, [])

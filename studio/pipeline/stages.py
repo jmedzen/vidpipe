@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 from vidpipe import config as vidpipe_config
-from vidpipe import quick
+from vidpipe import ocr, quick
 
 from . import llm, qc, textcheck, vidpipe
 from .config import abspath
@@ -203,6 +203,17 @@ class Run:
         write(out, picks)
         return picks
 
+    def text_in_footage(self, made: dict, picks: list[dict]) -> dict[str, list[str]]:
+        """成片的素材畫面有沒有燒進文字(用 tesseract;沒裝就略過)。回 {素材 id: 看到的字}。"""
+        tl = read(vidpipe.work_dir(self.cfg, self.short_id) / "timeline.json")
+        flagged = ocr.scenes_with_text(made["path"], tl, vidpipe._env(self.cfg)) or []
+        by_scene = {p["scene"]: p["asset_id"] for p in picks}
+        out: dict[str, list[str]] = {}
+        for item in flagged:
+            if item["scene"] in by_scene:
+                out.setdefault(by_scene[item["scene"]], []).extend(item["words"])
+        return out
+
     # ---- 6 manifest
     def manifest(self, script: dict, picks: list[dict]) -> dict:
         scenes = []
@@ -339,6 +350,15 @@ class Run:
             self.manifest(script, picks)
             try:
                 made = self.make()
+                flagged = self.text_in_footage(made, picks)
+                if flagged and attempt < quick.MAX_REPICKS:
+                    # 素材畫面燒進了文字(浮水印、宣傳字卡):記下來,換掉再做
+                    for asset_id, words in flagged.items():
+                        quick.ban_asset(self._vidpipe_cfg(), asset_id,
+                                        "畫面有文字:" + " ".join(words))
+                    (self.dir / "footage.json").unlink(missing_ok=True)
+                    self.log(f"素材畫面有文字,換掉重做:{'、'.join(flagged)}")
+                    continue
                 break
             except vidpipe.VidpipeError as exc:
                 # 挑到的素材抓不下來(影片下架、地區限制):記下來,換一支重挑
