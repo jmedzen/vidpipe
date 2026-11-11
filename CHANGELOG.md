@@ -70,3 +70,12 @@
   CLI `vidpipe voices [--transcribe]`、`GET /api/voices`、`POST /api/voices/transcribe`、設定頁的「掃描參考音檔」；
   存了新的資料夾會在背景補逐字稿。新增相依 `opencc-python-reimplemented`（純 Python）。
 - **相容性**：沒設 `voice_ref_dir` 時行為不變；有填 `reference_text` 就用填的。
+
+## 素材畫面燒進文字（浮水印、宣傳字卡）自動換掉
+
+- **為什麼**：6 支 Shorts 裡有 5 支用到畫面上壓著文字的 YouTube 素材：「JOIN OUR MEMBERSHIP」、「PURCHASE HD CLIPS」、
+  「Download 4K…」，還有 pond5 的「Exclusive on pond5.com」（那是未授權的預覽版浮水印）。
+- **改了什麼**：`vidpipe.ocr` 用 tesseract 掃描成片每個場景的中間一帶（避開標題與字幕），有清楚可辨的文字就把那支素材
+  記進 `work_dir/_quick/bad.json`、換一支重做（跟「抓不下來」同一套重挑，最多 4 次）。沒有安裝 tesseract（例如 Docker 映像）
+  時整個檢查略過，不影響出片。`studio` 共用同一個偵測。
+- **限制**：只認英數字；路牌之類的真實文字也會被當成可疑而換掉（寧可多換）。中文浮水印不在偵測範圍。

@@ -29,7 +29,8 @@ subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
 scenes, srt = [], []
 for i, s in enumerate(m["scenes"]):
     start = i * per + 0.2
-    scenes.append({"id": s["id"], "duration": per, "sentences": [
+    scenes.append({"id": s["id"], "start": i * per, "end": (i + 1) * per, "duration": per,
+                   "sentences": [
         {"text": s["text"], "start": start, "end": start + per - 0.7}]})
     def ts(x):
         return f"00:{int(x // 60):02d}:{x % 60:06.3f}".replace(".", ",")

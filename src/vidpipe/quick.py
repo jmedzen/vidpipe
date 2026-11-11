@@ -28,7 +28,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from . import assets, jobs, timeline
+from . import assets, jobs, ocr, timeline
 from . import manifest as manifest_mod
 from .clients.vidgrab import VidgrabClient
 from .config import Config
@@ -548,6 +548,24 @@ def store_request(cfg: Config, req: dict[str, Any]) -> Path:
     return root / REQUEST_FILE
 
 
+def _text_in_footage(cfg: Config, report: dict[str, Any], result: dict[str, Any]
+                     ) -> dict[str, list[str]]:
+    """成片的素材畫面有沒有燒進文字。回 {素材 id: 看到的字}；沒有 tesseract 或沒問題回空的。"""
+    try:
+        timeline_doc = json.loads((timeline.short_dir(cfg, report["id"]) / "timeline.json")
+                                  .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    flagged = ocr.scenes_with_text(result["path"], timeline_doc) or []
+    by_scene = {b["id"]: b["asset_id"] for b in report["beats"]}
+    out: dict[str, list[str]] = {}
+    for item in flagged:
+        asset_id = by_scene.get(item["scene"])
+        if asset_id:
+            out.setdefault(asset_id, []).extend(item["words"])
+    return out
+
+
 def run(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = None,
         output: str | None = None) -> dict[str, Any]:
     """一筆文案做到成片：分鏡 → 挑素材 → 旁白 → 渲染 → 封面與 credits。"""
@@ -563,6 +581,14 @@ def run(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = None
         manifest, effective = shorts.parse_document(doc, cfg)
         try:
             result = shorts.make(manifest, doc, effective, output)
+            flagged = _text_in_footage(cfg, built["report"], result)
+            if flagged and attempt < MAX_REPICKS:
+                # 素材畫面燒進了文字（浮水印、宣傳字卡）：記下來、換掉再做
+                for asset_id, words in flagged.items():
+                    ban_asset(cfg, asset_id, "畫面有文字：" + " ".join(words))
+                    dropped.append(asset_id)
+                jobs.log("素材畫面有文字，換掉重做：" + "、".join(flagged), "warning")
+                continue
             break
         except UpstreamError as exc:
             # 挑到的素材抓不下來（影片下架、地區限制）：記下來、換一支重挑；旁白與做好的場景有快取
@@ -573,7 +599,8 @@ def run(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = None
             dropped.append(asset_id)
             jobs.log(f"{asset_id} 抓不下來，換一支素材重挑", "warning")
     if dropped:
-        built["report"]["warnings"].append("這些素材抓不下來，已換掉：" + "、".join(dropped))
+        built["report"]["warnings"].append(
+            "這些素材抓不下來或畫面有文字，已換掉：" + "、".join(dropped))
     record_use(cfg, req["id"], sorted({b["asset_id"] for b in built["report"]["beats"]}))
     result["warnings"] = [*built["report"]["warnings"], *result.get("warnings", [])]
     result["quick"] = {k: built["report"][k] for k in ("chars", "estimated_seconds", "licenses")}
