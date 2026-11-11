@@ -21,6 +21,8 @@ const TESTS: Record<string, TestAction[]> = {
     { id: 'tts', label: '測試連線', target: 'tts', title: '連 TTS，列出已載入的模型' },
     { id: 'speak', label: '試合成一句', target: 'tts', deep: true,
       title: '真的請 TTS 合成一句話（不留檔），確認模型與音色參考音檔配得上' },
+    { id: 'voices', label: '掃描參考音檔', target: 'voices', deep: true,
+      title: '列出參考音檔資料夾裡的音檔；沒有逐字稿（同名 .txt）的用 ASR 辨識並存回資料夾' },
   ],
   subtitles: [{ id: 'ffmpeg', label: '測試 ffmpeg 與字體', target: 'ffmpeg',
     title: '確認 ffmpeg 有 libass，並用 libass 真的畫一格字幕，看選到哪個字體' }],

@@ -62,3 +62,11 @@
 - **為什麼**：重做 6 支 Shorts 時，有 3 支因為同一支 YouTube 素材已經下架（`This video is not available`）而整支失敗。
 - **改了什麼**：`vidpipe quick` 與 `studio` 遇到「vidgrab 抓不到 <素材>」時，把那支素材記進 `work_dir/_quick/bad.json`、
   換一支重挑再做（最多 4 次）；之後所有作品都不會再挑到它。`studio batch` 把日期寫進批次計畫，隔天續跑仍接著同一組 run。
+## 參考音檔資料夾與自動逐字稿（`voice_ref_dir`、`vidpipe voices`）
+
+- **為什麼**：換音色時要自己找出參考音檔說了什麼、貼進 `reference_text`；音檔一多就很麻煩，也容易打錯。
+- **改了什麼**：新設定 `voice_ref_dir`、`asr_model`、`asr_language`。資料夾裡沒有同名 `.txt` 的音檔，用 audio.cpp 的
+  ASR 辨識、轉成台灣繁體後存回同一個資料夾。`voice_ref` 可以只寫檔名；`reference_text` 留空時自動讀同名 `.txt`。
+  CLI `vidpipe voices [--transcribe]`、`GET /api/voices`、`POST /api/voices/transcribe`、設定頁的「掃描參考音檔」；
+  存了新的資料夾會在背景補逐字稿。新增相依 `opencc-python-reimplemented`（純 Python）。
+- **相容性**：沒設 `voice_ref_dir` 時行為不變；有填 `reference_text` 就用填的。

@@ -493,6 +493,25 @@ def _spawn(cfg: Config, cmd: list[str]) -> str:
         return _wait_for_job(cfg, proc, errfile)
 
 
+def launch_voices(cfg: Config) -> dict[str, Any] | None:
+    """背景補參考音檔的逐字稿（`vidpipe voices --transcribe`）。
+
+    沒設資料夾、沒設 ASR 模型、或每個音檔都已經有逐字稿，就不開工作（回 None）。"""
+    from . import voices
+
+    if not cfg.voice_ref_dir:
+        return None
+    try:
+        missing = [it for it in voices.scan(cfg) if not it["has_transcript"]]
+    except VidpipeError:
+        return None           # 資料夾不在這台機器上：交給設定頁的測試去說明
+    if not missing or not cfg.asr_model:
+        return None
+    job_id = _spawn(cfg, [sys.executable, "-m", "vidpipe", "voices", "--transcribe"])
+    return {"op": "voices", "job": job_id, "status_url": f"/api/job/{job_id}",
+            "files": [it["name"] for it in missing]}
+
+
 QUICK_SHARED = ("series", "music", "allow_unknown_license", "subtitle_size", "aspect")
 
 

@@ -38,7 +38,7 @@ from .config import SPECS, Config, FieldSpec
 from .errors import BadInput, ConfigError, FieldErrors, VidpipeError
 
 READONLY_ENV = "VIDPIPE_SETTINGS_READONLY"
-TEST_TARGETS = ("vidgrab", "tts", "ffmpeg", "dirs")
+TEST_TARGETS = ("vidgrab", "tts", "ffmpeg", "dirs", "voices")
 SAMPLE_TEXT = "你好，這是一句測試。"
 
 _LOCK = threading.Lock()
@@ -317,7 +317,37 @@ def _wav_seconds(data: bytes) -> float | None:
         return None
 
 
+def test_voices(cfg: Config, *, deep: bool = False) -> dict[str, Any]:
+    """參考音檔資料夾：每個音檔有沒有逐字稿；`deep` 就把沒有的用 ASR 補上（寫進同一個資料夾）。"""
+    from . import voices
+
+    try:
+        items = voices.transcribe_missing(cfg)["items"] if deep else voices.scan(cfg)
+    except VidpipeError as exc:
+        return {"checks": [_check("voices", False, exc.message, hint=exc.hint)]}
+    if not items:
+        return {"checks": [_check("voices", False, f"{cfg.voice_ref_dir} 裡沒有音檔",
+                                  hint="支援 .wav、.mp3、.flac、.m4a")]}
+    checks = []
+    for it in items:
+        status = it.get("status")
+        if status == "failed":
+            checks.append(_check(f"voice:{it['name']}", False,
+                                 f"{it['name']}：辨識失敗（{it['error']}）"))
+        elif it["has_transcript"]:
+            note = "剛辨識完，已存成 .txt" if status == "transcribed" else "已有逐字稿"
+            checks.append(_check(f"voice:{it['name']}", True,
+                                 f"{it['name']}：{note}　{it['text'][:40]}"))
+        else:
+            checks.append(_check(f"voice:{it['name']}", False, f"{it['name']}：沒有逐字稿",
+                                 hint="按「掃描參考音檔」用 ASR 補上", required=False))
+    return {"checks": checks}
+
+
 def test_tts(cfg: Config, *, deep: bool = False) -> dict[str, Any]:
+    from . import voices
+
+    cfg = voices.resolve(cfg)
     client = TTSClient(cfg.tts_base_url, cfg.tts_token, model=cfg.tts_model,
                        voice_ref=cfg.voice_ref, reference_text=cfg.reference_text, retries=0)
     models: list[str] = []
@@ -467,7 +497,8 @@ def run_test(target: str, draft: dict[str, Any] | None = None, *, deep: bool = F
     file = path or cfgmod.config_path()
     cfg = _effective(_draft_values(draft or {}, file), file)
     runners = {"vidgrab": test_vidgrab, "ffmpeg": test_ffmpeg, "dirs": test_dirs,
-               "tts": lambda c: test_tts(c, deep=deep)}
+               "tts": lambda c: test_tts(c, deep=deep),
+               "voices": lambda c: test_voices(c, deep=deep)}
     result, ms = _timed(lambda: runners[target](cfg))
     checks = result["checks"]
     return {"target": target, "ok": all(c["ok"] for c in checks if c["required"]),

@@ -34,6 +34,19 @@ class TTSClient(HttpClient):
             data = data.get("data") or data.get("models") or []
         return [m for m in data if isinstance(m, dict)]
 
+    def transcribe(self, path: str, *, model: str, language: str = "") -> str:
+        """audio.cpp 的 ASR：辨識 TTS 伺服器那台機器上的音檔，回文字。
+
+        `path` 是那台機器上的路徑（audio.cpp 自己讀檔）。"""
+        payload: dict[str, Any] = {"model": model, "audio": path}
+        if language:
+            payload["language"] = language
+        data = self.request("POST", "/v1/audio/transcriptions", json=payload).json()
+        if not isinstance(data, dict) or not isinstance(data.get("text"), str):
+            raise UpstreamError("ASR 回的不是 {\"text\": …}", upstream="tts", retryable=False,
+                                hint="確認 asr_model 是 audio.cpp 已載入的 ASR 模型")
+        return data["text"]
+
     def speak(self, text: str, *, model: str = "", voice_ref: str = "",
               reference_text: str = "") -> bytes:
         """合成一段文字，回傳 WAV 位元組。"""

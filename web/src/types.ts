@@ -390,7 +390,7 @@ export interface SettingsSaved extends SettingsInfo {
 
 export interface SettingsTest {
   ok: true
-  target: 'vidgrab' | 'tts' | 'ffmpeg' | 'dirs'
+  target: 'vidgrab' | 'tts' | 'ffmpeg' | 'dirs' | 'voices'
   checks: Check[]
   models: string[]
   elapsed_ms: number

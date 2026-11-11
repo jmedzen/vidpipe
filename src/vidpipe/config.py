@@ -41,6 +41,9 @@ class Config:
     tts_concurrency: int = 1     # 同時送幾句去合成；本機單一模型通常 1 最穩
     voice_ref: str = ""          # 參考音檔路徑（CosyVoice3 等需要）
     reference_text: str = ""     # 參考音檔的逐字稿
+    voice_ref_dir: str = ""      # 參考音檔資料夾：沒有逐字稿（同名 .txt）的會自動用 ASR 補
+    asr_model: str = ""          # audio.cpp 已載入的 ASR 模型 id（補逐字稿用）
+    asr_language: str = "zh"     # ASR 的語言；中文結果會轉成台灣繁體
     # 輸出
     work_dir: str = "work"       # 中間產物與快取
     out_dir: str = "out"         # 成品
@@ -149,8 +152,24 @@ _SPEC_LIST: tuple[FieldSpec, ...] = (
         placeholder="（不用就留空）"),
     FieldSpec(
         "reference_text", "tts", "textarea", "參考音檔逐字稿",
-        "參考音檔裡實際說的話，要逐字一致。沒填音色參考音檔時不會送出。",
+        "參考音檔裡實際說的話，要逐字一致。沒填音色參考音檔時不會送出。"
+        "留空時，會自動讀參考音檔旁邊的同名 .txt。",
         depends_on="voice_ref"),
+    FieldSpec(
+        "voice_ref_dir", "tts", "path", "參考音檔資料夾",
+        "放參考音檔的資料夾（TTS 伺服器那台機器上的路徑）。儲存或按「掃描參考音檔」時，"
+        "沒有逐字稿（同名 .txt）的音檔會用 audio.cpp 的 ASR 辨識，轉成繁體後存回同一個資料夾。"
+        "設了它，上面的「音色參考音檔」可以只填檔名。",
+        placeholder="（不用就留空）"),
+    FieldSpec(
+        "asr_model", "tts", "text", "ASR 模型",
+        "補逐字稿用的 audio.cpp ASR 模型 id（要先在 audio.cpp 載入，例如 Qwen3 ASR）。"
+        "按「測試連線」會列出已載入的模型。",
+        placeholder="（要補逐字稿時才需要）", depends_on="voice_ref_dir"),
+    FieldSpec(
+        "asr_language", "tts", "text", "ASR 語言",
+        "交給 ASR 的語言代碼，中文填 zh。中文結果一律轉成台灣繁體。",
+        placeholder="zh", depends_on="voice_ref_dir"),
     FieldSpec(
         "subtitle_langs", "subtitles", "choice", "字幕語言",
         "每支片預設的字幕語言；manifest 的 subtitles 可以個別蓋過。",

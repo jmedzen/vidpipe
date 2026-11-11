@@ -273,6 +273,11 @@ class Handler(BaseHTTPRequestHandler):
                             "vidgrab_open": config_mod.vidgrab_open_url(cfg)})
             elif route == "/api/settings":
                 self._json({"ok": True, **settings_mod.describe()})
+            elif route == "/api/voices":
+                from . import voices as voices_mod
+
+                cfg = config_mod.load()
+                self._json({"ok": True, "dir": cfg.voice_ref_dir, "items": voices_mod.scan(cfg)})
             elif route == "/api/doctor":
                 self._doctor(query)
             elif route == "/api/jobs":
@@ -325,9 +330,12 @@ class Handler(BaseHTTPRequestHandler):
                 revision = body.get("revision")
                 if revision is not None and not isinstance(revision, str):
                     raise BadInput("revision 要是字串")
-                self._json({"ok": True, **settings_mod.apply(
-                    body.get("changes") or {}, revision=revision,
-                    replace_invalid=body.get("replace_invalid") is True)})
+                saved = settings_mod.apply(body.get("changes") or {}, revision=revision,
+                                           replace_invalid=body.get("replace_invalid") is True)
+                # 改了參考音檔資料夾：在背景替沒有逐字稿的音檔補上（工作頁看得到）
+                if {"voice_ref_dir", "asr_model"} & set(saved.get("changed") or ()):
+                    saved["voices_job"] = shorts_mod.launch_voices(config_mod.load())
+                self._json({"ok": True, **saved})
             elif self.command == "POST" and route == "/api/settings/test":
                 body = self._body()
                 self._json({"ok": True, **settings_mod.run_test(
@@ -336,6 +344,9 @@ class Handler(BaseHTTPRequestHandler):
             elif self.command == "POST" and route == "/api/validate":
                 manifest, _ = shorts_mod.parse_document(self._manifest_doc())
                 self._json({"ok": True, **shorts_mod.describe(manifest)})
+            elif self.command == "POST" and route == "/api/voices/transcribe":
+                self._json({"ok": True, **(shorts_mod.launch_voices(config_mod.load())
+                                           or {"job": None})}, 202)
             elif self.command == "POST" and route == "/api/restart":
                 self._json({"ok": True, "restarting": True}, 202)
                 request_restart(self.server)

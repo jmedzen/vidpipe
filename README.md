@@ -94,7 +94,9 @@ Container Manager →「專案」→ 新增 →「建立 docker-compose.yml」�
 | `tts_base_url` / `tts_token` | `http://127.0.0.1:8301` / 空 | 旁白（audio.cpp） |
 | `tts_model` | 空 | TTS 模型 id；尚未決定，空 = 伺服器預設 |
 | `tts_concurrency` | `1` | 同時送幾句去合成（1–16）；本機單一模型通常 1 最穩 |
-| `voice_ref` / `reference_text` | 空 | 音色參考音檔與逐字稿（CosyVoice3 等需要） |
+| `voice_ref` / `reference_text` | 空 | 音色參考音檔與逐字稿（CosyVoice3 等需要）；`reference_text` 留空時讀音檔旁邊的同名 `.txt` |
+| `voice_ref_dir` | 空 | 參考音檔資料夾。沒有逐字稿（同名 `.txt`）的音檔會用 audio.cpp 的 ASR 辨識、轉成台灣繁體，存回同一個資料夾（見下面的 voices）；設了它，`voice_ref` 可以只寫檔名 |
+| `asr_model` / `asr_language` | 空 / `zh` | 補逐字稿用的 audio.cpp ASR 模型 id（要先在 audio.cpp 載入）與語言 |
 | `subtitle_langs` | `zh-TW` | `zh-TW` 或 `zh-TW+en`（雙語） |
 | `burn_subtitles` | `true` | 字幕是否燒進影片；關掉只輸出字幕檔 |
 | `subtitle_font` | `Noto Sans CJK TC` | 燒字幕用的字體（系統要裝得到；Docker 映像裡有 Noto CJK，Mac 請改成 `PingFang TC` 之類） |
@@ -108,6 +110,21 @@ Container Manager →「專案」→ 新增 →「建立 docker-compose.yml」�
   `VIDPIPE_SETTINGS_READONLY=1` 讓設定頁（與 API）變成唯讀，給「對外開放但不想讓人改設定」的部署。
 - 上表每一項都能用 `VIDPIPE_` 加大寫名稱設定（例如 `VIDPIPE_SUBTITLE_FONT`、`VIDPIPE_TARGET_LUFS`）。
 - 伺服器另外認這幾個（不在設定檔裡）：`VIDPIPE_HOST`、`VIDPIPE_PORT`、`VIDPIPE_API_TOKEN`、`VIDPIPE_NO_AUTH`、`VIDPIPE_ALLOWED_HOSTS`（見[安全](#mcp讓-claude-code-直接用-vidpipe)）。
+
+## voices：參考音檔資料夾與自動逐字稿
+
+```bash
+vidpipe voices                                   # 列出 voice_ref_dir 裡的音檔，哪些有逐字稿
+vidpipe voices --transcribe                      # 沒有逐字稿的用 audio.cpp 的 ASR 辨識，存成同名 .txt
+vidpipe voices --dir "/path/ref" --model qwen3-asr --transcribe
+```
+
+- 逐字稿就是音檔旁邊的同名 `.txt`（`a.wav` → `a.txt`）。已經有的不動，手改過的也不會被蓋掉。
+- ASR 用 audio.cpp 的 `POST /v1/audio/transcriptions`（`asr_model`、`asr_language`），結果用 OpenCC 轉成台灣繁體、標點轉全形。
+  模型要先在 audio.cpp 載入；沒有載入 ASR 模型時會直接說，不會留下半套檔案。一個檔失敗不影響其他檔。
+- 網頁「設定」頁：存了新的 `voice_ref_dir`（或 `asr_model`）會在背景開一個 `voices` 工作補逐字稿；「旁白 · TTS」那一組的
+  「掃描參考音檔」按鈕會列出每個音檔的狀態，並當場補上沒有的。HTTP：`GET /api/voices`、`POST /api/voices/transcribe`。
+- 路徑是 **audio.cpp 那台機器上的**。vidpipe 跟它不在同一台機器（例如 NAS 的 Docker）時讀不到這個資料夾，要在 audio.cpp 那台跑。
 
 ## split／speak：分句與逐句旁白
 
