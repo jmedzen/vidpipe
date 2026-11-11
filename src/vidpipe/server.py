@@ -348,7 +348,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **(shorts_mod.launch_voices(config_mod.load())
                                            or {"job": None})}, 202)
             elif self.command == "POST" and route == "/api/restart":
-                self._json({"ok": True, "restarting": True}, 202)
+                body = self._body()
+                if body.get("watch") is True:
+                    WATCH_NEXT.set()
+                self._json({"ok": True, "restarting": True, "watch": WATCH_NEXT.is_set()}, 202)
                 request_restart(self.server)
             elif self.command == "POST" and route == "/api/quick":
                 self._json({"ok": True, **shorts_mod.launch_quick(config_mod.load(),
@@ -568,19 +571,73 @@ def request_restart(httpd: Any, delay: float = 0.3) -> None:
     threading.Timer(delay, httpd.shutdown).start()
 
 
-def restart_argv(argv: list[str]) -> list[str]:
-    """重新執行自己用的參數：原本的參數，加上 `--no-open`（不要每次重啟都再開一個瀏覽器分頁）。"""
+def restart_argv(argv: list[str], *, watch: bool = False) -> list[str]:
+    """重新執行自己用的參數：原本的參數，加上 `--no-open`（不要每次重啟都再開一個瀏覽器分頁）。
+
+    `watch` 為真就再加 `--watch`（`POST /api/restart` 帶 `{"watch": true}` 可以把自動重載打開）。
+    """
     args = list(argv[1:])
     if "--no-open" not in args:
         args.append("--no-open")
+    if watch and "--watch" not in args:
+        args.append("--watch")
     return [sys.executable, "-m", "vidpipe", *args]
 
 
+WATCH_NEXT = threading.Event()        # 重啟後要不要帶 --watch（POST /api/restart 的 watch）
+WATCH_INTERVAL = 2.0                  # 幾秒檢查一次程式碼有沒有變
+WATCH_SETTLE = 1.5                    # 偵測到變動後再等多久（git pull 會連續改很多檔）
+
+
+def source_stamp(root: Path | None = None) -> float:
+    """vidpipe 套件裡所有 .py 與前端產物最後修改的時間；`git pull` 之後它會變大。"""
+    base = root or Path(__file__).resolve().parent
+    stamp = 0.0
+    for pattern in ("*.py", "clients/*.py", "static/index.html", "static/.build-stamp",
+                    "data/*.json"):
+        for path in base.glob(pattern):
+            try:
+                stamp = max(stamp, path.stat().st_mtime)
+            except OSError:
+                continue
+    return stamp
+
+
+def watch_source(httpd: Any, *, interval: float = WATCH_INTERVAL, settle: float = WATCH_SETTLE,
+                 root: Path | None = None, stop: threading.Event | None = None) -> threading.Thread:
+    """`serve --watch`：程式碼變了（例如 `git pull`）就自動重啟，不必手動。
+
+    重啟只換掉網頁伺服器；跑到一半的工作是獨立的子行程，不受影響。
+    """
+    stop = stop or threading.Event()
+
+    def loop() -> None:
+        seen = source_stamp(root)
+        while not stop.wait(interval):
+            now = source_stamp(root)
+            if now == seen:
+                continue
+            if stop.wait(settle):             # 等檔案不再變動
+                return
+            if source_stamp(root) != now:
+                seen = 0.0                    # 還在變：下一輪再看
+                continue
+            print("程式碼有更新，重新啟動…", file=sys.stderr)
+            WATCH_NEXT.set()
+            request_restart(httpd, delay=0.0)
+            return
+
+    thread = threading.Thread(target=loop, name="vidpipe-watch", daemon=True)
+    thread.start()
+    return thread
+
+
 def serve(host: str | None = None, port: int | None = None, *, open_browser: bool = True,
-          allow_lan: bool = False, no_auth: bool = False) -> int:
+          allow_lan: bool = False, no_auth: bool = False, watch: bool = False) -> int:
     host = host or os.environ.get("VIDPIPE_HOST") or "127.0.0.1"
     port = port if port is not None else int(os.environ.get("VIDPIPE_PORT") or DEFAULT_PORT)
     no_auth = no_auth or (os.environ.get("VIDPIPE_NO_AUTH") or "") in ("1", "true", "yes")
+    watch = watch or (os.environ.get("VIDPIPE_WATCH") or "") in ("1", "true", "yes")
     check_bind(host, allow_lan=allow_lan, token=api_token(), no_auth=no_auth)
     cfg = config_mod.load()
     httpd = make_server(host, port, token="" if no_auth else None)
@@ -591,6 +648,9 @@ def serve(host: str | None = None, port: int | None = None, *, open_browser: boo
     print(f"  work 目錄：{Path(cfg.work_dir).resolve()}", file=sys.stderr)
     if httpd.token:  # type: ignore[attr-defined]
         print("  已啟用 API token；瀏覽器先開 /?token=<token> 登入", file=sys.stderr)
+    if watch:
+        print("  --watch：程式碼更新（git pull）後會自動重新啟動", file=sys.stderr)
+        watch_source(httpd)
     print("  Ctrl+C 結束", file=sys.stderr)
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
@@ -602,6 +662,6 @@ def serve(host: str | None = None, port: int | None = None, *, open_browser: boo
         httpd.server_close()
     if RESTART.is_set():          # POST /api/restart：port 已經放掉，用同樣的參數換成新的行程
         print("重新啟動…", file=sys.stderr)
-        argv = restart_argv(sys.argv)
+        argv = restart_argv(sys.argv, watch=watch or WATCH_NEXT.is_set())
         os.execv(argv[0], argv)
     return 0
