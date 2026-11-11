@@ -93,3 +93,9 @@ def test_cli_lists_and_transcribes(refdir, monkeypatch, capsys):
     done = json.loads(capsys.readouterr().out)
     assert done["ok"] and done["output"]["transcribed"] == 1
     assert (refdir / "a.txt").read_text(encoding="utf-8").strip() == "辨識結果。"
+
+
+def test_english_transcripts_keep_their_punctuation_and_spaces():
+    text = "That's what it was, but this is $700."
+    assert voices.tidy(f"  {text}  ") == text
+    assert voices.tidy("Fine,\n give me\tthe chip") == "Fine, give me the chip"

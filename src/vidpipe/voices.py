@@ -86,12 +86,15 @@ _FULLWIDTH = str.maketrans({",": "，", "?": "？", "!": "！", ":": "：", ";":
 
 
 def tidy(text: str) -> str:
-    """中文逐字稿：標點轉全形、去掉多餘空白。"""
-    text = to_traditional(text.strip()).translate(_FULLWIDTH)
-    if re.search(r"[一-鿿]", text):
-        text = re.sub(r"(?<=[一-鿿])\.", "。", text)
-        text = re.sub(r"\s+", "", text)
-    return text
+    """逐字稿：中文的標點轉全形、去掉多餘空白，並轉成台灣繁體。
+
+    沒有中文字的（英文參考音檔）原樣保留，標點不動，免得英文被塞進全形逗號。"""
+    text = text.strip()
+    if not re.search(r"[\u4e00-\u9fff]", text):
+        return re.sub(r"\s+", " ", text)
+    text = to_traditional(text).translate(_FULLWIDTH)
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\.", "。", text)
+    return re.sub(r"\s+", "", text)
 
 
 def _atomic_write(path: Path, text: str) -> None:
