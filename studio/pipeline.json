@@ -11,8 +11,8 @@
   },
   "voice": {
     "model": "drama3",
-    "voice_ref": "/Users/jm/SyncDev/23-ref Audio/Ref-Audio-馬克思2.wav",
-    "reference_text": "Fine, give me the bin chip, one less CPU core, whatever. But also I'm just, I'm curious about that nano texture, cause that looks nice. And this seems like a product should probably get it on, right? It's been getting better and better over the years. It's really good at canceling out"
+    "voice_ref": "/Users/jm/SyncDev/23-ref Audio/Ref-Audio-male-都A1.wav",
+    "reference_text": "有了它，在外面再也不怕被蚊子咬了。你看這隻母蚊子，飛了幾十米，終於找到了一個正在猛喘氣的大活人。沒想到剛一湊近，底下一股風，呼的一下就把它吸進了。"
   },
   "timing": {
     "lead": 0.2,
