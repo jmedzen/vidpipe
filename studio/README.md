@@ -67,7 +67,7 @@ cd studio
 
 ## 各階段
 
-- **選題**:`topics/topics.json`(主題、核心觀念、允許的出處、日常場景);做過的記在 `topics/_done.json`,批次會跳過。
+- **選題**:`topics/topics.json`(主題、核心觀念、允許的出處、日常場景);做過的記在 `topics/_done.json`(本機狀態,不進版控),批次會跳過。
 - **腳本**:`prompts/script.md`。產出 hook 備選、常駐標題、場景(每景一個畫面主題)、金句、小練習、出處。
 - **規則檢查**(`pipeline/textcheck.py`,不靠 LLM):總字數、句長 20 字、禁用的開場與用語、簡體字、出處與標題。
 - **審稿**:`prompts/review.md`,由另一個獨立的 LLM 呼叫執行。硬性問題或任何一項低於 4 分就退回重寫;
