@@ -135,7 +135,8 @@ def test_describe_defaults(cfg_file):
     assert fields_["tts_concurrency"]["value"] == 1 and fields_["tts_concurrency"]["max"] == 16
     assert fields_["subtitle_langs"]["choices"][1]["value"] == "zh-TW+en"
     assert fields_["tts_token"]["value"] is None and fields_["tts_token"]["is_set"] is False
-    assert [g["id"] for g in desc["groups"]] == ["vidgrab", "tts", "subtitles", "audio", "storage"]
+    assert [g["id"] for g in desc["groups"]] == ["vidgrab", "tts", "subtitles", "layout", "audio",
+                                                 "storage"]
 
 
 def test_describe_tells_env_from_file_from_default(cfg_file, monkeypatch):

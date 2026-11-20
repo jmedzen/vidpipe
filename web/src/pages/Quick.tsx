@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { ErrorBanner } from '../components/ErrorBanner'
-import { postJson } from '../lib/api'
+import { TemplatePreview } from '../components/TemplatePreview'
+import { postJson, useApi } from '../lib/api'
+import type { TemplateList } from '../lib/templates'
 import { useAction } from '../lib/useAction'
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
@@ -44,6 +46,7 @@ interface Options {
   music: boolean
   allowUnknown: boolean
   subtitleSize: string
+  template: string
 }
 
 function optionBody(o: Options) {
@@ -51,7 +54,8 @@ function optionBody(o: Options) {
     series: o.series.trim() || undefined,
     music: o.music,
     allow_unknown_license: o.allowUnknown,
-    subtitle_size: o.subtitleSize,
+    subtitle_size: o.subtitleSize || undefined,
+    template: o.template || undefined,
   }
 }
 
@@ -61,7 +65,39 @@ function formatOf(name: string, text: string): string {
   return /^\s*[[{]/.test(text) ? 'json' : 'csv'
 }
 
-/** 共用的選項：系列名稱、字幕字級、音樂、授權。 */
+/** 排版模板：下拉選單＋示意圖。空字串＝設定的預設模板。 */
+function TemplateField({ value, onChange, prefix, series }: {
+  value: string
+  onChange: (name: string) => void
+  prefix: string
+  series: string
+}) {
+  const list = useApi<TemplateList>('/api/templates')
+  const items = (list.data?.items ?? []).filter((i) => i.template)
+  const chosen = items.find((i) => i.name === (value || list.data?.default))?.template
+  return (
+    <div className="quick-template">
+      <div className="field">
+        <label htmlFor={`${prefix}-template`}>排版模板</label>
+        <select id={`${prefix}-template`} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">預設（{list.data?.default ?? '…'}）</option>
+          {items.map((i) => (
+            <option key={i.name} value={i.name}>{i.template!.label}{i.builtin ? '' : '（自訂）'}</option>
+          ))}
+        </select>
+        <p className="muted small">
+          {chosen?.description || '標題、字幕、系列名稱的樣式。'}　<a href="#/templates">管理模板</a>
+        </p>
+      </div>
+      {chosen && list.data && (
+        <TemplatePreview tpl={chosen} colors={list.data.colors} width={chosen.aspect === '16:9' ? 160 : 90}
+                         series={series || '系列名稱'} />
+      )}
+    </div>
+  )
+}
+
+/** 共用的選項：模板、系列名稱、字幕字級、音樂、授權。 */
 function OptionFields({ value, onChange, prefix }: {
   value: Options
   onChange: (next: Options) => void
@@ -69,6 +105,8 @@ function OptionFields({ value, onChange, prefix }: {
 }) {
   return (
     <>
+      <TemplateField value={value.template} prefix={prefix} series={value.series}
+                     onChange={(template) => onChange({ ...value, template })} />
       <div className="field-row">
         <div className="field">
           <label htmlFor={`${prefix}-series`}>系列名稱（選填）</label>
@@ -80,11 +118,12 @@ function OptionFields({ value, onChange, prefix }: {
           <label htmlFor={`${prefix}-size`}>字幕字級</label>
           <select id={`${prefix}-size`} value={value.subtitleSize}
                   onChange={(e) => onChange({ ...value, subtitleSize: e.target.value })}>
+            <option value="">照模板</option>
             <option value="normal">一般</option>
-            <option value="large">大（預設）</option>
+            <option value="large">大</option>
             <option value="xlarge">特大</option>
           </select>
-          <p className="muted small">字越大，每行放得下的字越少。</p>
+          <p className="muted small">字越大，每行放得下的字越少。選「照模板」就用模板的字級。</p>
         </div>
       </div>
       <div className="field tick">
@@ -158,7 +197,7 @@ function SingleForm({ options, setOptions }: { options: Options; setOptions: (o:
           <label htmlFor="qk-title">標題（選填）</label>
           <input id="qk-title" type="text" value={title} placeholder="不填就用第一句" maxLength={40}
                  onChange={(e) => setTitle(e.target.value)} autoComplete="off" />
-          <p className="muted small">黃色大字，整支片都在畫面上方；也是封面的標題。</p>
+          <p className="muted small">整支片都在畫面上（樣式看模板）；也是封面的標題。</p>
         </div>
         <div className="field">
           <label htmlFor="qk-id">作品 id（選填）</label>
@@ -264,7 +303,7 @@ function BatchForm({ options, setOptions }: { options: Options; setOptions: (o: 
 /** 文案直出：貼文案（或上傳一批）→ 自動分鏡、挑畫面、配音、成片。不需要 LLM。 */
 export function QuickPage({ mode }: { mode: string }) {
   const [options, setOptions] = useState<Options>({
-    series: '', music: true, allowUnknown: true, subtitleSize: 'large',
+    series: '', music: true, allowUnknown: true, subtitleSize: '', template: '',
   })
   const batch = mode === 'batch'
   return (

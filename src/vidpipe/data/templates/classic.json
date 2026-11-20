@@ -1,0 +1,6 @@
+{
+  "schema": "vidpipe.template/1",
+  "name": "classic",
+  "label": "經典",
+  "description": "黃色大標題在上、白字黑邊字幕在下、系列名稱小字在底部。沒指定模板時就是這個。"
+}

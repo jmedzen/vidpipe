@@ -252,3 +252,14 @@ def test_ocr_flags_only_clearly_readable_text():
     assert quick.ocr.suspicious(["Download", "4K"]) and quick.ocr.suspicious(["descriptions"])
     assert not quick.ocr.suspicious([]) and not quick.ocr.suspicious(["ok"])
     assert quick.ocr.scenes_with_text("x.mp4", {"scenes": []}) in (None, [])
+
+
+def test_dry_run_with_a_template_builds_its_layout(world):
+    out = world("quick", "--text", TEXT, "--id", "tb", "--dry-run", "--no-music",
+                "--template", "zen", "--series", "一分鐘")
+    doc = out["manifest"]
+    assert out["report"]["template"] == "zen"
+    assert [o["text"] for o in doc["overlays"]] == ["一分鐘"]          # zen 不放常駐標題
+    assert doc["overlays"][0]["position"] == "top"
+    assert doc["subtitles"]["color"] == "paleyellow" and doc["subtitles"]["margin"] == 0.26
+    assert {s["fit"] for s in doc["scenes"]} == {"blur_pad"}

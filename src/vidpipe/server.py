@@ -286,6 +286,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._job(route[len("/api/job/"):], query)
             elif route == "/api/shorts":
                 self._json({"ok": True, "shorts": shorts_mod.list_shorts(config_mod.load())})
+            elif route == "/api/templates":
+                self._json({"ok": True, **shorts_mod.list_templates(config_mod.load())})
             elif route.startswith("/api/short/"):
                 self._json({"ok": True, "short": shorts_mod.detail(
                     config_mod.load(), urllib.parse.unquote(route[len("/api/short/"):]))})
@@ -354,7 +356,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **shorts_mod.launch_quick(config_mod.load(),
                                                                   self._body())}, 202)
             elif self.command == "POST" and route == "/api/quick/preview":
-                self._json({"ok": True, **shorts_mod.quick_preview(self._body())})
+                self._json({"ok": True, **shorts_mod.quick_preview(self._body(),
+                                                                   config_mod.load())})
+            elif self.command == "PUT" and len(parts) == 3 and parts[:2] == ["api", "templates"]:
+                from . import templates as templates_mod
+
+                self._json({"ok": True, **templates_mod.save(
+                    self._body().get("template"), config_mod.load(),
+                    name=urllib.parse.unquote(parts[2]))})
+            elif self.command == "DELETE" and len(parts) == 3 \
+                    and parts[:2] == ["api", "templates"]:
+                from . import templates as templates_mod
+
+                self._json({"ok": True, **templates_mod.delete(
+                    urllib.parse.unquote(parts[2]), config_mod.load())})
             elif self.command == "POST" and len(parts) == 2 and parts[0] == "api" \
                     and parts[1] in shorts_mod.OPS:
                 self._start(parts[1])

@@ -1,0 +1,9 @@
+{
+  "schema": "vidpipe.template/1",
+  "name": "bold",
+  "label": "置中大字",
+  "description": "特大黃色字幕放在畫面中下方當主角，白色標題、青色系列名稱。適合金句、問句開場。",
+  "subtitles": {"size": "xlarge", "color": "yellow", "margin": 0.36},
+  "title": {"size": "large", "color": "white"},
+  "series": {"color": "cyan"}
+}
