@@ -52,6 +52,9 @@ class Config:
     subtitle_langs: str = "zh-TW"  # zh-TW 或 zh-TW+en（雙語）
     burn_subtitles: bool = True    # 預設燒進影片；關掉就只輸出字幕檔
     subtitle_font: str = "Noto Sans CJK TC"  # 燒字幕用的字體；要是系統裝得到的繁中字體
+    # 排版模板（templates.py）
+    default_template: str = "classic"  # 文案直出沒指定模板時用哪個
+    template_dir: str = "templates"    # 自己存的模板放這裡（內建的在套件裡）
     # 聲音
     normalize_audio: bool = True   # 成片的響度標準化到 target_lufs（TTS 的音量常常偏小）
     target_lufs: float = -14.0     # 整合響度（LUFS）；Shorts／串流平台大約都落在 -14
@@ -113,6 +116,7 @@ GROUPS: tuple[Group, ...] = (
     Group("vidgrab", "素材來源 · vidgrab", "搜尋與下載素材、授權資訊"),
     Group("tts", "旁白 · TTS", "audio.cpp 或任何 OpenAI 風格的 /v1/audio/speech（例如 ttsgrab）"),
     Group("subtitles", "字幕", "語言、要不要燒進影片、用哪個字體"),
+    Group("layout", "排版模板", "標題、字幕、系列名稱的樣式存成模板，出片時選一個用"),
     Group("audio", "聲音", "成片的響度與背景音樂曲庫"),
     Group("storage", "資料夾與紀錄", "中間產物、成品放哪裡，以及工作紀錄"),
 )
@@ -188,6 +192,17 @@ _SPEC_LIST: tuple[FieldSpec, ...] = (
         "Mac 通常用 PingFang TC。按「測試 ffmpeg 與字體」可以確認。",
         suggestions=("Noto Sans CJK TC", "PingFang TC", "Heiti TC", "Microsoft JhengHei"),
         required=True, forbidden=",\n\r", forbidden_label="逗號或換行"),
+    FieldSpec(
+        "default_template", "layout", "text", "預設模板",
+        "文案直出沒指定模板時用哪個。內建：classic（經典）、clean（簡潔底框）、bold（置中大字）、"
+        "zen（靜心）；自己存的模板寫名稱就好。模板頁可以看每個長什麼樣。",
+        placeholder="classic", suggestions=("classic", "clean", "bold", "zen"),
+        required=True, forbidden=",\n\r/\\", forbidden_label="逗號、換行或斜線"),
+    FieldSpec(
+        "template_dir", "layout", "path", "自訂模板資料夾",
+        "網頁或 `vidpipe templates save` 存的模板放這裡，一個模板一個 .json。相對路徑是相對於 "
+        "vidpipe 啟動時的目錄。",
+        placeholder="templates", required=True, forbidden="\0", forbidden_label="空字元"),
     FieldSpec(
         "normalize_audio", "audio", "bool", "響度標準化",
         "把成片的響度調到目標值。TTS 的音量常常偏小，開著比較保險。"),

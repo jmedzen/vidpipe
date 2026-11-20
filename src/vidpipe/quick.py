@@ -11,7 +11,8 @@
    幾個安靜的空鏡主題。相鄰場景不用同一個主題。
 3. **素材**：每個主題向 vidgrab 搜一批（YouTube，優先授權明確的）。**別的作品用過的素材不再用**
    （`work_dir/_quick/used.json`）；沒用過的不夠時換一組關鍵字再搜，真的沒有才重複使用並警告。
-4. **版面**：上方常駐標題（預設用第一句）、下方系列名稱、加大的字幕、背景音樂。
+4. **版面**：照排版模板（`templates.py`，預設 classic）：上方常駐標題（預設用第一句）、
+   下方系列名稱、加大的字幕、背景音樂。`template` 可以指定別的模板（名稱或 .json 路徑）。
 5. **背景音樂**：本機曲庫（`bgm_dir`，見 `bgm.py`）有歌就從曲庫挑、輪流用；`music` 可以給標籤
    （`"古琴"`）只挑那類。曲庫是空的才去 vidgrab 的音樂庫找。
 
@@ -30,7 +31,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from . import assets, bgm, jobs, ocr, timeline
+from . import assets, bgm, jobs, ocr, templates, timeline
 from . import manifest as manifest_mod
 from .clients.vidgrab import VidgrabClient
 from .config import Config
@@ -47,7 +48,7 @@ MAX_REPICKS = 4                 # 素材抓不下來時最多重挑幾次
 MAX_NEW_SEARCHES = 3            # 一個主題一次最多再搜幾組新的關鍵字
 MIN_CLIP_SECONDS = 40
 LICENSE_RANK = {"free": 0, "free-attribution": 1, "check": 2, "unknown": 3}
-OPTION_KEYS = {"series", "music", "allow_unknown_license", "subtitle_size", "aspect"}
+OPTION_KEYS = {"series", "music", "allow_unknown_license", "subtitle_size", "aspect", "template"}
 REQUEST_KEYS = {"id", "title", "text", *OPTION_KEYS}
 
 _PUNCT = re.compile(r"[\s，。！？；：、「」『』（）《》〈〉…—\-,.!?;:'\"()]+")
@@ -112,8 +113,13 @@ def _fail(path: str, message: str, hint: str = "") -> BadInput:
     return BadInput(f"文案 {path}：{message}", hint=hint)
 
 
-def parse_request(doc: Any, *, today: dt.date | None = None) -> dict[str, Any]:
-    """驗證一筆文案，補上預設值。回的 dict 可以直接存檔、交給 `run`。"""
+def parse_request(doc: Any, *, today: dt.date | None = None,
+                  cfg: Config | None = None) -> dict[str, Any]:
+    """驗證一筆文案，補上預設值。回的 dict 可以直接存檔、交給 `run`。
+
+    `cfg` 用來找模板（`default_template`、`template_dir`）；沒給就用預設設定。
+    字幕字級、長寬比沒寫就用模板的。
+    """
     if not isinstance(doc, dict):
         raise _fail("（最上層）", "要是物件", '例：{"text": "文案…", "title": "標題"}')
     unknown = sorted(set(doc) - REQUEST_KEYS)
@@ -154,11 +160,21 @@ def parse_request(doc: Any, *, today: dt.date | None = None) -> dict[str, Any]:
             raise _fail(key, "要是 true 或 false" + ("，或曲庫的標籤（例如 古琴）"
                                                    if key == "music" else ""))
         out[key] = value
-    size = doc.get("subtitle_size") or "large"
+    ref = doc.get("template") or None
+    if ref is not None and not isinstance(ref, str):
+        raise _fail("template", "要是模板名稱或 .json 路徑")
+    try:
+        tpl = templates.get(ref, cfg)
+    except VidpipeError as exc:
+        raise _fail("template", exc.message, exc.hint) from None
+    # 指定的是檔案路徑就記路徑（`run` 再讀一次），否則記模板名稱
+    out["template"] = tpl["name"] if not ref or templates.NAME_RE.match(ref.strip()) \
+        else ref.strip()
+    size = doc.get("subtitle_size") or tpl["subtitles"]["size"]
     if size not in SUBTITLE_SIZES:
         raise _fail("subtitle_size", f"不認得 {size!r}", f"可用：{', '.join(SUBTITLE_SIZES)}")
     out["subtitle_size"] = size
-    aspect = doc.get("aspect") or "9:16"
+    aspect = doc.get("aspect") or tpl["aspect"]
     if aspect not in ("9:16", "16:9", "1:1"):
         raise _fail("aspect", f"不認得 {aspect!r}", "可用：9:16、16:9、1:1")
     out["aspect"] = aspect
@@ -172,7 +188,8 @@ def _narration_only(text: str) -> str:
 
 
 def parse_batch(data: Any, *, fmt: str = "", shared: dict[str, Any] | None = None,
-                today: dt.date | None = None) -> list[dict[str, Any]]:
+                today: dt.date | None = None, cfg: Config | None = None
+                ) -> list[dict[str, Any]]:
     """批次：JSON（清單，或 `{"items": [...]}`）、JSONL、CSV（要有 `text` 欄）。
 
     `data` 是已經解析的物件或原始文字；`fmt` 是 `json`／`jsonl`／`csv`，空的就自己判斷。
@@ -209,7 +226,7 @@ def parse_batch(data: Any, *, fmt: str = "", shared: dict[str, Any] | None = Non
         try:
             if shared and isinstance(item, dict):
                 item = {**shared, **item}
-            req = parse_request(item, today=today)
+            req = parse_request(item, today=today, cfg=cfg)
         except BadInput as exc:
             raise BadInput(f"第 {i + 1} 筆：{exc.message}", hint=exc.hint) from None
         if req["id"] in seen:
@@ -517,25 +534,27 @@ def build(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = No
     beats = storyboard(req["text"], lib)
     picks, warnings = pick_footage(cfg, req["id"], beats, client=client, lib=lib,
                                    allow_unknown=req["allow_unknown_license"])
-    portrait = req["aspect"] != "16:9"
-    overlays = [{"text": req["title"], "position": "top", "color": "yellow",
-                 "size": "xlarge" if portrait else "medium"}]
-    if req["series"]:
-        overlays.append({"text": req["series"], "position": "bottom", "size": "small"})
+    # 舊的 quick.json 沒有 template：用 classic（＝原本寫死的版面），重跑不會變樣
+    tpl = templates.get(req.get("template") or templates.DEFAULT, cfg)
+    parts = templates.manifest_parts(tpl, title=req["title"], series=req["series"],
+                                     aspect=req["aspect"], subtitle_size=req["subtitle_size"])
     doc: dict[str, Any] = {
         "schema": manifest_mod.SCHEMA, "id": req["id"], "title": req["title"],
-        "output": {"aspect": req["aspect"], "fps": 30},
-        "scenes": [{"id": b["id"], "text": b["text"], "fit": "crop",
+        "output": {"aspect": parts["aspect"], "fps": 30},
+        "scenes": [{"id": b["id"], "text": b["text"], "fit": parts["fit"],
                     "clip": {"asset_id": p["asset_id"], "start": p["start"]}}
                    for b, p in zip(beats, picks, strict=True)],
-        "subtitles": {"burn_in": True, "size": req["subtitle_size"]},
-        "overlays": overlays, "cover": {"text": req["title"]}}
+        "subtitles": parts["subtitles"],
+        "overlays": parts["overlays"], "cover": {"text": req["title"]}}
     music_report = None
-    if req["music"]:
+    if req["music"] and parts["music_volume"] > 0:
         tags = req["music"] if isinstance(req["music"], str) else ""
         local = bgm.pick(cfg, req["id"], tags, warnings=warnings)
         if local:                      # 本機曲庫有歌就用曲庫（依標籤、輪流用）
-            doc["music"] = local["music"]
+            # 模板的音量 × 這首自己的相對音量（曲庫預設 0.22 = 1 倍）
+            scale = local["track"]["volume"] / bgm.DEFAULT_VOLUME
+            doc["music"] = {**local["music"],
+                            "volume": round(min(2.0, parts["music_volume"] * scale), 3)}
             music_report = {"source": "library", "id": local["track"]["id"],
                             "title": local["track"]["title"], "license": local["track"]["license"],
                             "tags": local["track"]["tags"]}
@@ -545,10 +564,11 @@ def build(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = No
                                 "改從 vidgrab 的音樂庫找")
             track = pick_music(cfg, req["id"], client, lib, warnings)
             if track:
-                doc["music"] = {"asset_id": track, "start": 4, "volume": 0.22}
+                doc["music"] = {"asset_id": track, "start": 4, "volume": parts["music_volume"]}
                 music_report = {"source": "vidgrab", "id": track}
     kinds = [(p["item"].get("license") or {}).get("kind") or "unknown" for p in picks]
-    report = {"id": req["id"], "title": req["title"], "chars": chars(req["text"]),
+    report = {"id": req["id"], "title": req["title"], "template": tpl["name"],
+              "chars": chars(req["text"]),
               "estimated_seconds": round(chars(req["text"]) / 4.2 + len(beats) * 0.4, 1),
               "beats": [{"id": b["id"], "theme": b["theme"], "text": b["text"],
                          "asset_id": p["asset_id"], "start": p["start"],

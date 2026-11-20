@@ -12,7 +12,10 @@
 - **停留**：最後一頁在聲音結束後多停 0.15 秒（不超過下一句的開始），太短的句子至少
   顯示 0.4 秒，所以不會閃一下就消失；任何兩條字幕都不重疊。
 - **位置**：字幕放在底部，但留出 Shorts 介面（標題、頻道名）會蓋住的空間：直式（9:16）
-  離底邊 20%，橫式 8%。字級與每行字數都跟輸出寬度成比例，不同長寬比都適用。
+  離底邊 20%，橫式 8%（`subtitles.margin` 可以改）。字級與每行字數都跟輸出寬度成比例，
+  不同長寬比都適用。
+- **樣式**：預設白字黑邊、英文淡黃；`subtitles.color`／`en_color` 換顏色，`box` 改成
+  半透明黑底框（不描邊），`font` 換這支片的字體。排版模板（`templates.py`）就是填這幾個欄位。
 
 字體預設 `Noto Sans CJK TC`（Docker 裡有裝；Mac 要自己裝，或用 `subtitle_font` 指定）。
 """
@@ -25,6 +28,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .colors import BOX_COLOR, ass_color
 from .manifest import Subtitles
 from .video import OutputSpec
 
@@ -76,14 +80,18 @@ BASE_SIZE = 0.06             # 字級佔短邊的比例（normal）
 SIZE_SCALE = {"normal": 1.0, "large": 1.25, "xlarge": 1.5}
 
 
-def layout_for(spec: OutputSpec, size_name: str = "normal") -> Layout:
+def layout_for(spec: OutputSpec, size_name: str = "normal",
+               margin: float | None = None) -> Layout:
+    """`margin`：字幕離底邊佔畫面高度的比例；None = 直式 20%、橫式 8%。"""
     # 以短邊為準：橫式不會變成巨大的字
     size = round(min(spec.width, spec.height) * BASE_SIZE * SIZE_SCALE[size_name])
     portrait = spec.height > spec.width
+    if margin is None:
+        margin = 0.20 if portrait else 0.08
     return Layout(width=spec.width, height=spec.height, font_size=size,
                   en_size=round(size * EN_SCALE), outline=max(2, round(size * 0.08)),
                   margin_side=round(spec.width * 0.07),
-                  margin_bottom=round(spec.height * (0.20 if portrait else 0.08)))
+                  margin_bottom=round(spec.height * margin))
 
 
 # ------------------------------------------------------------------ 折行
@@ -295,7 +303,6 @@ def _ass_text(line: str) -> str:
 
 
 OVERLAY_SCALE = {"xlarge": 1.6, "large": 1.2, "medium": 1.0, "small": 0.6}
-OVERLAY_COLOR = {"white": "&H00FFFFFF", "yellow": "&H0033DDFF"}   # ASS 是 BGR
 OVERLAY_MAX_LINES = 3
 
 
@@ -316,7 +323,7 @@ def _overlay_lines(overlays: Sequence[dict[str, str]], layout: Layout, total: fl
         base = min(layout.width, layout.height) * BASE_SIZE
         size = round(base * OVERLAY_SCALE[o["size"]])
         align = 8 if o["position"] == "top" else 2
-        color = OVERLAY_COLOR[o["color"]]
+        color = ass_color(o["color"])
         styles.append(
             f"Style: Overlay{i},{{font}},{size},{color},{color},&H00000000,&H78000000,-1,0,0,0,"
             f"100,100,0,0,1,{max(2, round(size * 0.08))},1,{align},{layout.margin_side},"
@@ -328,12 +335,20 @@ def _overlay_lines(overlays: Sequence[dict[str, str]], layout: Layout, total: fl
 
 
 def to_ass(entries: list[Entry], layout: Layout, font: str,
-           overlays: Sequence[dict[str, str]] = (), total: float = 0.0) -> str:
+           overlays: Sequence[dict[str, str]] = (), total: float = 0.0,
+           style_of: Subtitles | None = None) -> str:
+    look = style_of or Subtitles()
+
     def style(name: str, size: int, color: str) -> str:
-        # Bold=-1、BorderStyle=1（描邊）、Alignment=2（底部置中）
-        return (f"Style: {name},{font},{size},{color},{color},&H00000000,&H78000000,-1,0,0,0,"
-                f"100,100,0,0,1,{layout.outline},1,2,{layout.margin_side},{layout.margin_side},"
-                f"{layout.margin_bottom},1")
+        # Bold=-1、BorderStyle=1（描邊）或 3（底框）、Alignment=2（底部置中）
+        if look.box:   # 底框：OutlineColour 是框的顏色，Outline 是框的留白
+            border, outline_color, shadow = 3, BOX_COLOR, 0
+            outline = max(4, round(size * 0.22))
+        else:
+            border, outline_color, shadow, outline = 1, "&H00000000", 1, layout.outline
+        return (f"Style: {name},{font},{size},{color},{color},{outline_color},&H78000000,-1,0,0,"
+                f"0,100,100,0,0,{border},{outline},{shadow},2,{layout.margin_side},"
+                f"{layout.margin_side},{layout.margin_bottom},1")
 
     overlay_styles, overlay_events = _overlay_lines(overlays, layout, total)
     lines = [
@@ -349,8 +364,8 @@ def to_ass(entries: list[Entry], layout: Layout, font: str,
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        style("Default", layout.font_size, "&H00FFFFFF"),
-        style("En", layout.en_size, "&H0066E0FF"),
+        style("Default", layout.font_size, ass_color(look.color)),
+        style("En", layout.en_size, ass_color(look.en_color)),
         *(line.replace("{font}", font) for line in overlay_styles),
         "",
         "[Events]",
@@ -367,8 +382,13 @@ def to_ass(entries: list[Entry], layout: Layout, font: str,
 
 def build(timeline: Timeline, subtitles: Subtitles, spec: OutputSpec, font: str,
           overlays: Sequence[dict[str, str]] = ()) -> Subs:
-    """字幕檔。`overlays`（manifest 的常駐疊字）只進 `.ass`（燒進畫面的那一份），不進 `.srt`。"""
-    layout = layout_for(spec, subtitles.size)
+    """字幕檔。`overlays`（manifest 的常駐疊字）只進 `.ass`（燒進畫面的那一份），不進 `.srt`。
+
+    `font` 是設定的字體；manifest 的 `subtitles.font` 有寫就用那個。
+    """
+    layout = layout_for(spec, subtitles.size, subtitles.margin)
     entries, warnings = entries_for(timeline, subtitles, layout)
+    font = subtitles.font or font
     return Subs(tuple(entries), to_srt(entries),
-                to_ass(entries, layout, font, overlays, timeline.total), tuple(warnings))
+                to_ass(entries, layout, font, overlays, timeline.total, subtitles),
+                tuple(warnings))

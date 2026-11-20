@@ -282,10 +282,34 @@ vidpipe quick batch.csv                                    # 批次：CSV（要�
 - **版面**：上方加大的黃色常駐標題（`--title`，不給就用第一句）、下方系列名稱（`--series`）、加大的字幕、背景音樂。
 - **背景音樂**：本機曲庫（`bgm_dir`，預設 `./bgm`）有歌就從曲庫挑、輪流用最久沒用過的；`--music 古琴` 只挑某類
   （見[背景音樂曲庫](#bgm背景音樂曲庫)）。曲庫是空的才從 vidgrab 的音樂庫找。`--no-music` 關掉。
-- **批次**的每一筆欄位：`text`（必填）、`id`、`title`、`series`、`music`、`allow_unknown_license`、`subtitle_size`、`aspect`。
+- **批次**的每一筆欄位：`text`（必填）、`id`、`title`、`series`、`music`、`allow_unknown_license`、`subtitle_size`、`aspect`、`template`。
   一個工作、一支接一支做；一支失敗不影響其他支，結果逐筆列出。
 - HTTP：`POST /api/quick`，本體是單筆（`{"text": …}`）、`{"items": [...]}`，或 `{"batch": "<CSV 或 JSON 文字>", "format": "csv"}`；
   回 202 與 `job`。`POST /api/quick/preview` 只回分鏡（不連網、不開工作）。網頁的「文案直出」頁用的就是這兩個。
+
+
+## templates：排版模板
+
+一支 Short 的版面（標題、字幕、系列名稱的位置、大小、顏色，字幕底框與字體，素材怎麼放進畫面，配樂音量）
+可以存成有名字的模板，文案直出時選一個用。
+
+```bash
+vidpipe templates                         # 列出（內建 classic、clean、bold、zen，加上自己存的）
+vidpipe templates show bold               # 看完整內容
+vidpipe templates save 我的.json --name pink-box   # 存成自己的模板（放在 template_dir，預設 ./templates）
+vidpipe templates delete pink-box
+vidpipe quick 文案.txt --template bold     # 用模板出片（也可以給 .json 路徑）
+```
+
+- 模板格式 `vidpipe.template/1`：除了 `schema`、`name` 都選填，沒寫的用 classic 的值。欄位見 `src/vidpipe/templates.py`。
+- 沒指定模板時用設定的 `default_template`（預設 classic＝原本的版面，成片跟以前一樣）。
+- 文案自己寫的 `subtitle_size`、`aspect` 優先於模板。
+- 網頁：側欄「排版模板」可以看示意圖、以內建模板為底建立、編輯、刪除、設為預設；「文案直出」頁多了模板選單。
+  HTTP：`GET /api/templates`、`PUT /api/templates/<name>`（本體 `{"template": {...}}`）、`DELETE /api/templates/<name>`。
+- 模板只是用來「組 manifest」：manifest 本身不記模板名稱，之後改模板不會讓已經做好的片變樣。
+  manifest 新增的樣式欄位：`subtitles.color`、`en_color`、`margin`、`box`、`font`；`overlays[].color` 除了 white、yellow
+  也可以用 paleyellow、cyan、pink、orange、green、black 或 `#RRGGBB`。
+- studio：`pipeline.json` 加 `"template": "bold"`（或 `./pipeline run … --template bold`）；沒寫就照原本的版面。
 
 ## plan：交給 vidpipe 挑素材
 

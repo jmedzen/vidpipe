@@ -13,6 +13,14 @@
 - **相容性**：曲庫是空的（或不存在）時行為跟以前一樣，從 vidgrab 找音樂；studio 的 `music.tracks` 照舊當備援。
   `music` 原本只收 true／false，現在其他字串會當成標籤（以前會報錯）。
 
+## 排版模板（`vidpipe templates`、`--template`）
+
+- **為什麼**：使用者想把出片的排版存起來，換著用好幾種 Shorts 樣式；原本版面寫死在 `quick.build`（studio 也抄了一份）。
+- **改了什麼**：新增 `vidpipe.template/1`（`templates.py`）與四個內建模板（classic、clean、bold、zen）；
+  manifest 的 `subtitles` 多了 `color`、`en_color`、`margin`、`box`、`font`，`overlays[].color` 多了幾個顏色與 `#RRGGBB`；
+  `quick --template`、設定 `default_template`／`template_dir`、網頁「排版模板」頁與文案直出的模板選單、studio 的 `template`。
+- **相容性**：沒指定模板＝classic，組出的 manifest 與 `.ass` 跟改版前一字不差（有比對）；新欄位都是選填。
+
 ## 本機檔案可以宣告授權（`clip.license`／`music.license`）
 
 - **為什麼**：下游的 vidoutput 流水線在沒有素材站 API key 時用自己生成的背景畫面（`clip.path`）。

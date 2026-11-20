@@ -1,0 +1,8 @@
+{
+  "schema": "vidpipe.template/1",
+  "name": "clean",
+  "label": "簡潔底框",
+  "description": "白色標題、字幕放在半透明黑底框裡，素材畫面再雜也看得清楚。",
+  "subtitles": {"size": "normal", "box": true, "margin": 0.18},
+  "title": {"size": "large", "color": "white"}
+}
