@@ -101,6 +101,7 @@ Container Manager →「專案」→ 新增 →「建立 docker-compose.yml」�
 | `burn_subtitles` | `true` | 字幕是否燒進影片；關掉只輸出字幕檔 |
 | `subtitle_font` | `Noto Sans CJK TC` | 燒字幕用的字體（系統要裝得到；Docker 映像裡有 Noto CJK，Mac 請改成 `PingFang TC` 之類） |
 | `normalize_audio` / `target_lufs` | `true` / `-14` | 成片的響度標準化（整合響度 LUFS，-30 到 -5）；TTS 常常偏小聲，開著比較保險 |
+| `bgm_dir` | `bgm` | 本機背景音樂曲庫（見[背景音樂曲庫](#bgm背景音樂曲庫)） |
 | `work_dir` / `out_dir` | `work` / `out` | 中間產物與成品 |
 | `record_jobs` | `true` | 長指令是否在 `work_dir/_jobs` 留下紀錄（網頁看得到）；關掉就不寫 |
 
@@ -125,6 +126,23 @@ vidpipe voices --dir "/path/ref" --model qwen3-asr --transcribe
 - 網頁「設定」頁：存了新的 `voice_ref_dir`（或 `asr_model`）會在背景開一個 `voices` 工作補逐字稿；「旁白 · TTS」那一組的
   「掃描參考音檔」按鈕會列出每個音檔的狀態，並當場補上沒有的。HTTP：`GET /api/voices`、`POST /api/voices/transcribe`。
 - 路徑是 **audio.cpp 那台機器上的**。vidpipe 跟它不在同一台機器（例如 NAS 的 Docker）時讀不到這個資料夾，要在 audio.cpp 那台跑。
+
+## bgm：背景音樂曲庫
+
+把音檔放進 `bgm_dir`（預設 `./bgm`）就能用，**子資料夾名稱就是標籤**（`bgm/古琴/流水.mp3` → 標籤「古琴」）；
+音檔旁邊的同名 `.json` 可以寫 `license`（`own`／`free`／`free-attribution`）、`credit`、`author`、`url`、`tags`、
+`start`、`volume`、`enabled`。每支片挑「最久沒用過」的那首，同一支片重做拿到同一首（`bgm/.vidpipe/history.json`）。
+沒標授權的照樣能用，但 credits 會打 ⚠。vidpipe 不會自己下載音樂。
+
+```bash
+vidpipe bgm init                              # 建立資料夾與說明檔
+vidpipe bgm list [--tags 古琴]                # 曲目、標籤、授權、長度、用過幾次
+vidpipe bgm pick --id lg-01 --tags 古琴,笛簫  # 替一支片挑一首，回可以直接放進 manifest 的 music
+vidpipe bgm set 古琴/流水.mp3 --license free-attribution --credit "作者《流水》（CC BY 4.0）— 網址"
+```
+
+網頁的「背景音樂」頁可以試聽、依標籤篩、編輯授權與標籤。去哪裡找可以合法使用的音樂、授權怎麼看、
+風格方向，見 [docs/bgm.md](docs/bgm.md)。
 
 ## split／speak：分句與逐句旁白
 
@@ -261,8 +279,9 @@ vidpipe quick batch.csv                                    # 批次：CSV（要�
   做完後用 tesseract（有裝才檢查）掃描每個場景的畫面中間，壓著浮水印或宣傳字（英數字）的素材會被換掉重做。
   挑到的素材抓不下來（影片下架、地區限制）會記進 `work_dir/_quick/bad.json`、自動換一支重做，之後不再挑它。
   `--only-clear-license` 只用授權明確的（預設也放行授權未標示的，`credits.md` 會標出來）。
-- **版面**：上方加大的黃色常駐標題（`--title`，不給就用第一句）、下方系列名稱（`--series`）、加大的字幕、
-  vidgrab 音樂庫的背景音樂（`--no-music` 關掉）。
+- **版面**：上方加大的黃色常駐標題（`--title`，不給就用第一句）、下方系列名稱（`--series`）、加大的字幕、背景音樂。
+- **背景音樂**：本機曲庫（`bgm_dir`，預設 `./bgm`）有歌就從曲庫挑、輪流用最久沒用過的；`--music 古琴` 只挑某類
+  （見[背景音樂曲庫](#bgm背景音樂曲庫)）。曲庫是空的才從 vidgrab 的音樂庫找。`--no-music` 關掉。
 - **批次**的每一筆欄位：`text`（必填）、`id`、`title`、`series`、`music`、`allow_unknown_license`、`subtitle_size`、`aspect`、`template`。
   一個工作、一支接一支做；一支失敗不影響其他支，結果逐筆列出。
 - HTTP：`POST /api/quick`，本體是單筆（`{"text": …}`）、`{"items": [...]}`，或 `{"batch": "<CSV 或 JSON 文字>", "format": "csv"}`；
@@ -513,6 +532,10 @@ API（皆為 JSON，錯誤格式同 CLI）：
 | PUT | `/api/short/{id}/manifest` | 改 manifest：body `{"manifest": {...}, "revision": "<manifest_revision>"}`。驗證過才寫入；`revision` 已經不是現在那份（別的視窗、agent 或重新 plan 改過）回 409 `stale_manifest`；作品 id 改不了；有工作在跑回 409。改完 `POST /api/make` 只會重做改到的旁白與場景 |
 | POST | `/api/short/{id}/search` | 替這支片的一個場景或音樂搜替換素材（不寫任何檔、不下載影片）：body `{"query": "night market, steam"（字串或陣列）, "target": "scene:<場景 id>" 或 "music", "platform"（選填，預設 `stock`／音樂 `music`）, "orientation"（選填，預設 `any`）, "allow_unknown_license"（選填）, "limit"（選填，預設 24）}`。回 `candidates`：縮圖、授權、方向、長度、`why`、`enough`（夠不夠長）、`used_in`（已經用在哪些場景）、`current`；授權不明的預設不列，只回 `skipped_license` 有幾支 |
 | DELETE | `/api/short/{id}` | 刪掉這支片的中間檔與成品（旁白快取是共用的，不動）；有工作在跑回 409 |
+| GET | `/api/bgm` | 背景音樂曲庫：資料夾、曲目（標籤、授權、長度、用過幾次）、標籤統計 |
+| GET | `/api/bgm/audio?id=<曲目>` | 試聽（曲庫裡的相對路徑；支援 `Range`） |
+| POST | `/api/bgm/init` | 建立曲庫資料夾 |
+| PUT | `/api/bgm/track` | 改一首的資訊：`{"id": "古琴/流水.mp3", "changes": {"license": "free", "tags": ["夜晚"]}}`，寫成同名 `.json` |
 | GET | `/file/{id}/{out\|work}/{檔名}` | 成品（`out`：mp4、封面、credits、srt）與中間檔（`work`）；支援 `Range` |
 
 ### 用 HTTP 讓 agent 做一支片（agent 與 vidpipe 不在同一台機器時）

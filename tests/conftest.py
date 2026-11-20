@@ -77,3 +77,9 @@ def _isolate_env(tmp_path, monkeypatch):
             monkeypatch.delenv(key)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("VIDPIPE_CONFIG", str(tmp_path / "none.json"))
+
+
+@pytest.fixture(autouse=True)
+def _empty_bgm_library(tmp_path_factory, monkeypatch):
+    """測試不能讀到開發機上真的背景音樂曲庫（預設 ./bgm）：一律指向空資料夾。"""
+    monkeypatch.setenv("VIDPIPE_BGM_DIR", str(tmp_path_factory.mktemp("bgm-empty")))

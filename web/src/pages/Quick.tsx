@@ -5,6 +5,7 @@ import { TemplatePreview } from '../components/TemplatePreview'
 import { postJson, useApi } from '../lib/api'
 import type { TemplateList } from '../lib/templates'
 import { useAction } from '../lib/useAction'
+import type { BgmLibrary } from './Music'
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -44,6 +45,8 @@ interface Started {
 interface Options {
   series: string
   music: boolean
+  /** 曲庫的標籤；空字串＝整個曲庫輪流。 */
+  musicTag: string
   allowUnknown: boolean
   subtitleSize: string
   template: string
@@ -52,7 +55,7 @@ interface Options {
 function optionBody(o: Options) {
   return {
     series: o.series.trim() || undefined,
-    music: o.music,
+    music: o.music ? (o.musicTag || true) : false,
     allow_unknown_license: o.allowUnknown,
     subtitle_size: o.subtitleSize || undefined,
     template: o.template || undefined,
@@ -103,6 +106,9 @@ function OptionFields({ value, onChange, prefix }: {
   onChange: (next: Options) => void
   prefix: string
 }) {
+  const lib = useApi<BgmLibrary>('/api/bgm')
+  const usable = lib.data?.usable ?? 0
+  const tags = lib.data?.tags ?? []
   return (
     <>
       <TemplateField value={value.template} prefix={prefix} series={value.series}
@@ -131,9 +137,24 @@ function OptionFields({ value, onChange, prefix }: {
                onChange={(e) => onChange({ ...value, music: e.target.checked })} />
         <label htmlFor={`${prefix}-music`}>
           放背景音樂
-          <span className="muted small">　從 vidgrab 的音樂庫挑一首（CC0 或 CC BY），旁白出聲時自動壓低。</span>
+          <span className="muted small">
+            {usable > 0
+              ? <>　從你的<a href="#/music">背景音樂曲庫</a>（{usable} 首）輪流挑，旁白出聲時自動壓低。</>
+              : <>　曲庫是空的，先從 vidgrab 的音樂庫挑（CC0 或 CC BY）。到<a href="#/music">背景音樂</a>頁加入自己的曲子。</>}
+          </span>
         </label>
       </div>
+      {value.music && tags.length > 0 && (
+        <div className="field">
+          <label htmlFor={`${prefix}-music-tag`}>音樂類型</label>
+          <select id={`${prefix}-music-tag`} value={value.musicTag}
+                  onChange={(e) => onChange({ ...value, musicTag: e.target.value })}>
+            <option value="">全部輪流</option>
+            {tags.map((t) => <option key={t.tag} value={t.tag}>{t.tag}（{t.count} 首）</option>)}
+          </select>
+          <p className="muted small">標籤來自曲庫的子資料夾名稱與每首的標籤。同一類裡也是輪流用最久沒用過的。</p>
+        </div>
+      )}
       <div className="field tick">
         <input id={`${prefix}-unknown`} type="checkbox" checked={value.allowUnknown}
                onChange={(e) => onChange({ ...value, allowUnknown: e.target.checked })} />
@@ -278,7 +299,7 @@ function BatchForm({ options, setOptions }: { options: Options; setOptions: (o: 
         {readError && <p className="field-problem small">{readError}</p>}
         <p className="muted small">
           CSV 的第一列是欄位名稱，一定要有 <code>text</code>；可以再加 <code>id</code>、<code>title</code>、
-          <code>series</code>、<code>music</code>。JSON 是物件的清單，欄位相同。一批最多 50 筆。
+          <code>series</code>、<code>music</code>（<code>false</code> 不放，或寫曲庫標籤例如 <code>古琴</code>）。JSON 是物件的清單，欄位相同。一批最多 50 筆。
         </p>
       </div>
       <div className="field">
@@ -303,7 +324,7 @@ function BatchForm({ options, setOptions }: { options: Options; setOptions: (o: 
 /** 文案直出：貼文案（或上傳一批）→ 自動分鏡、挑畫面、配音、成片。不需要 LLM。 */
 export function QuickPage({ mode }: { mode: string }) {
   const [options, setOptions] = useState<Options>({
-    series: '', music: true, allowUnknown: true, subtitleSize: '', template: '',
+    series: '', music: true, musicTag: '', allowUnknown: true, subtitleSize: '', template: '',
   })
   const batch = mode === 'batch'
   return (

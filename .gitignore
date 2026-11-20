@@ -12,6 +12,8 @@ vidpipe.json
 # 產出
 work/
 out/
+# 背景音樂曲庫（音檔與授權資料是你自己的，不進版控）
+bgm/
 # 前端
 web/node_modules/
 

@@ -22,6 +22,13 @@ def _env(cfg: dict) -> dict:
     env.update(vp.get("env", {}))
     env["VIDPIPE_WORK_DIR"] = str(Path(cfg["work"]) / "vidpipe")
     env["VIDPIPE_OUT_DIR"] = str(Path(cfg["work"]) / "vidpipe-out")
+    # 背景音樂曲庫:pipeline.json 的 music.dir > 環境變數 VIDPIPE_BGM_DIR
+    # > repo 根目錄的 bgm/(跟 vidpipe serve 用同一個)
+    music_dir = (cfg.get("music") or {}).get("dir")
+    if music_dir:
+        env["VIDPIPE_BGM_DIR"] = abspath(cfg, music_dir)
+    elif not env.get("VIDPIPE_BGM_DIR"):
+        env["VIDPIPE_BGM_DIR"] = str(Path(cfg["root"]).parent / "bgm")
     if vp.get("path_prepend"):
         env["PATH"] = os.path.expanduser(vp["path_prepend"]) + os.pathsep + env.get("PATH", "")
     return env

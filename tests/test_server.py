@@ -514,3 +514,40 @@ def test_restart_endpoint_can_turn_watch_on(start, monkeypatch):
     assert body == {"ok": True, "restarting": True, "watch": True}
     server.WATCH_NEXT.clear()
     assert run.post("/api/restart", json={}).json()["watch"] is False
+
+
+# ------------------------------------------------------------ 背景音樂曲庫
+
+def test_bgm_library_list_audio_with_range_and_edit(start, tmp_path, monkeypatch):
+    root = tmp_path / "bgm"
+    (root / "古琴").mkdir(parents=True)
+    song = root / "古琴" / "流水.mp3"
+    song.write_bytes(b"ID3" + bytes(range(256)) * 4)     # 不是真的 mp3：長度讀不到，但能列能放
+    (tmp_path / "secret.mp3").write_bytes(b"TOP SECRET")
+    monkeypatch.setenv("VIDPIPE_BGM_DIR", str(root))
+    srv = start()
+    listed = srv.get("/api/bgm").json()
+    assert listed["ok"] and listed["exists"] and listed["usable"] == 0
+    assert [t["id"] for t in listed["tracks"]] == ["古琴/流水.mp3"]
+    resp = srv.get("/api/bgm/audio", params={"id": "古琴/流水.mp3"},
+                   headers={"Range": "bytes=0-2"})
+    assert resp.status_code == 206 and resp.content == b"ID3"
+    assert resp.headers["Content-Type"] == "audio/mpeg"
+    for bad in ("../secret.mp3", str(tmp_path / "secret.mp3"), "古琴/沒有.mp3"):
+        assert srv.get("/api/bgm/audio", params={"id": bad}).status_code == 404
+    saved = srv.put("/api/bgm/track", json={"id": "古琴/流水.mp3",
+                                             "changes": {"license": "free", "tags": ["夜晚"]}})
+    assert saved.json()["track"]["tags"] == ["古琴", "夜晚"]
+    bad = srv.put("/api/bgm/track", json={"id": "古琴/流水.mp3", "changes": {"license": "x"}})
+    assert bad.status_code == 400
+    cross = srv.put("/api/bgm/track", json={"id": "古琴/流水.mp3", "changes": {}},
+                    headers={"Origin": "http://evil.example"})
+    assert cross.status_code == 403
+
+
+def test_bgm_init_creates_the_folder(start, tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDPIPE_BGM_DIR", str(tmp_path / "music"))
+    srv = start()
+    assert srv.get("/api/bgm").json()["exists"] is False
+    assert srv.post("/api/bgm/init").json()["created"] is True
+    assert (tmp_path / "music" / "說明.txt").is_file()

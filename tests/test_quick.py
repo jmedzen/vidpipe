@@ -35,7 +35,7 @@ def test_request_defaults_title_id_and_options():
 
 @pytest.mark.parametrize("doc, needle", [
     ({}, "text"), ({"text": "，。"}, "text"), ({"text": "好", "txt": 1}, "txt"),
-    ({"text": "好", "id": "Bad ID"}, "id"), ({"text": "好", "music": "maybe"}, "music"),
+    ({"text": "好", "id": "Bad ID"}, "id"), ({"text": "好", "music": 3}, "music"),
     ({"text": "好", "subtitle_size": "huge"}, "subtitle_size"),
     ({"text": "字" * 1300}, "太長"), ({"text": "畫面：nowhere\n你好。"}, "nowhere")])
 def test_bad_requests_say_which_field(doc, needle):
