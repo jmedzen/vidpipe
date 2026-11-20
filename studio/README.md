@@ -58,7 +58,9 @@ cd studio
 | `timing` | 旁白的停頓(場景開頭、句間、場景結尾) |
 | `series` | 畫面下方的系列名稱 |
 | `visuals.allow_unknown_license` | 是否放行 YouTube 上授權未標示的素材(授權明確的永遠優先) |
-| `music.tracks` | 配樂候選(vidgrab 音樂庫的 asset id,CC BY);每支片依 run id 固定挑一首 |
+| `music.tags` | 從 vidpipe 的背景音樂曲庫(repo 根目錄的 `bgm/`,見 `docs/bgm.md`)只挑這些標籤,例如 `["古琴", "笛簫"]`;不寫就整個曲庫輪流 |
+| `music.dir` | 曲庫資料夾(預設 repo 根目錄的 `bgm/`,跟網頁同一個) |
+| `music.tracks` | 曲庫是空的時候的備援:vidgrab 音樂庫的 asset id(CC BY);每支片依 run id 固定挑一首 |
 | `subtitle_size` | 字幕字級:`normal`、`large`(預設)、`xlarge` |
 | `chars_per_second` | 腳本字數換算秒數(4.2) |
 | `review_max_rounds` | 腳本最多改幾輪 |

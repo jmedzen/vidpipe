@@ -5,6 +5,7 @@ import { useApi } from './lib/api'
 import { leaveGuard } from './lib/leaveGuard'
 import { applyTheme, initialTheme } from './lib/theme'
 import { JobDetailPage, JobsPage } from './pages/Jobs'
+import { MusicPage } from './pages/Music'
 import { NewShortPage } from './pages/NewShort'
 import { Overview } from './pages/Overview'
 import { QuickPage } from './pages/Quick'
@@ -16,6 +17,7 @@ const NAV: NavItem[] = [
   { id: 'overview', label: '總覽', icon: '◎' },
   { id: 'quick', label: '文案直出', icon: '✎' },
   { id: 'shorts', label: '作品', icon: '▶' },
+  { id: 'music', label: '背景音樂', icon: '♪' },
   { id: 'jobs', label: '工作', icon: '▤' },
   { id: 'settings', label: '設定', icon: '⚙' },
 ]
@@ -39,7 +41,7 @@ function safeDecode(text: string): string {
 
 /**
  * hash 路由：`#/` → overview，`#/jobs`、`#/jobs/<id>`、`#/shorts`、`#/shorts/<id>`、
- * `#/shorts/<id>/<分頁>`、`#/quick`、`#/quick/batch`、`#/settings`。不認得的一律回總覽。
+ * `#/shorts/<id>/<分頁>`、`#/quick`、`#/quick/batch`、`#/music`、`#/settings`。不認得的一律回總覽。
  */
 function routeFromHash(): Route {
   const [id = '', param = '', sub = ''] = window.location.hash.replace(/^#\/?/, '').split('/')
@@ -88,6 +90,7 @@ export default function App() {
           ? <ShortDetailPage key={route.param} id={route.param} tab={route.sub} />
           : <ShortsPage />)}
         {route.page === 'jobs' && (route.param ? <JobDetailPage key={route.param} id={route.param} /> : <JobsPage />)}
+        {route.page === 'music' && <MusicPage />}
         {route.page === 'overview' && <Overview />}
       </main>
     </div>

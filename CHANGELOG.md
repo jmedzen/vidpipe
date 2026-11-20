@@ -2,6 +2,17 @@
 
 記錄「為什麼需要這個改動」，以及 merge 與上線驗證的結果。
 
+## 背景音樂曲庫（`bgm_dir`）
+
+- **為什麼**：背景音樂很單調，調性也不合口味。文案直出只會從 vidgrab 搜「calm piano」等三組關鍵字，結果快取成固定的
+  13 首（多半同一位作者），studio 更只有寫死的 3 首；使用者沒有辦法換成自己挑的曲子。
+- **改了什麼**：新增本機曲庫（`bgm_dir`，預設 `./bgm`）：放音檔就能用，子資料夾＝標籤，同名 `.json` 記授權與出處。
+  每支片挑同類裡最久沒用過的那首、重做不換歌。文案直出的 `music` 可以給標籤（`--music 古琴`、網頁的「音樂類型」）；
+  studio 的 `pipeline.json` 用 `music.tags`。網頁新增「背景音樂」頁：試聽、依標籤篩、編輯授權與標籤、建立資料夾。
+  `vidpipe bgm list／init／pick／set`。授權來源與風格方向整理在 `docs/bgm.md`。
+- **相容性**：曲庫是空的（或不存在）時行為跟以前一樣，從 vidgrab 找音樂；studio 的 `music.tracks` 照舊當備援。
+  `music` 原本只收 true／false，現在其他字串會當成標籤（以前會報錯）。
+
 ## 本機檔案可以宣告授權（`clip.license`／`music.license`）
 
 - **為什麼**：下游的 vidoutput 流水線在沒有素材站 API key 時用自己生成的背景畫面（`clip.path`）。

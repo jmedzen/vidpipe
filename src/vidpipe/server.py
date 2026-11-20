@@ -278,6 +278,16 @@ class Handler(BaseHTTPRequestHandler):
 
                 cfg = config_mod.load()
                 self._json({"ok": True, "dir": cfg.voice_ref_dir, "items": voices_mod.scan(cfg)})
+            elif route == "/api/bgm":
+                from . import bgm as bgm_mod
+
+                self._json({"ok": True, **bgm_mod.describe(config_mod.load())})
+            elif route == "/api/bgm/audio":
+                from . import bgm as bgm_mod
+
+                track = (urllib.parse.parse_qs(query).get("id") or [""])[0]
+                path = bgm_mod.find(config_mod.load(), track)
+                self._send_file(path, bgm_mod.content_type(path))
             elif route == "/api/doctor":
                 self._doctor(query)
             elif route == "/api/jobs":
@@ -353,6 +363,16 @@ class Handler(BaseHTTPRequestHandler):
                     WATCH_NEXT.set()
                 self._json({"ok": True, "restarting": True, "watch": WATCH_NEXT.is_set()}, 202)
                 request_restart(self.server)
+            elif self.command == "POST" and route == "/api/bgm/init":
+                from . import bgm as bgm_mod
+
+                self._json({"ok": True, **bgm_mod.init(config_mod.load())})
+            elif self.command == "PUT" and route == "/api/bgm/track":
+                from . import bgm as bgm_mod
+
+                body = self._body()
+                self._json({"ok": True, "track": bgm_mod.update(
+                    config_mod.load(), body.get("id"), body.get("changes"))})
             elif self.command == "POST" and route == "/api/quick":
                 self._json({"ok": True, **shorts_mod.launch_quick(config_mod.load(),
                                                                   self._body())}, 202)
@@ -444,6 +464,10 @@ class Handler(BaseHTTPRequestHandler):
             self._error(f"沒有這個檔案：/file/{rest}", status=404, code="not_found")
             return
         path, ctype = shorts_mod.resolve_file(config_mod.load(), *parts)
+        self._send_file(path, ctype)
+
+    def _send_file(self, path: Path, ctype: str) -> None:
+        """送一個檔案，支援單一 Range（影片、音樂可以拖拉）。"""
         size = path.stat().st_size
         start, end, status = 0, size - 1, 200
         header = self.headers.get("Range")

@@ -128,7 +128,8 @@ nav { display: flex; flex-direction: column; gap: 3px; }
   .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   aside { flex-direction: row; align-items: center; flex-wrap: wrap; border-right: 0;
           border-bottom: 1px solid var(--line); padding: 10px 14px; }
-  nav { flex-direction: row; }
+  nav { flex-direction: row; flex-wrap: wrap; }
+  .nav { white-space: nowrap; padding: 6px 9px; }
   .side-foot { margin: 0 0 0 auto; flex-direction: row; align-items: center; }
   main { --pad-top: 18px; padding: var(--pad-top) 16px 40px; }
 }
@@ -580,3 +581,24 @@ button.link:hover:not(:disabled) { color: var(--text); border-color: transparent
 .quick-preview { margin-top: 14px; overflow-x: auto; }
 .quick-preview table.grid td:first-child { white-space: nowrap; }
 .form-actions button + button { margin-left: 2px; }
+
+/* ---------------------------------------------------------- 背景音樂曲庫 */
+.bgm-where { margin-bottom: 14px; }
+.bgm-where p { margin: 8px 0 0; }
+.bgm-where p button { margin-left: 8px; }
+.bgm-dir { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bgm-dir code { overflow-wrap: anywhere; }
+.bgm-filter { margin-bottom: 14px; }
+.bgm-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); align-items: start; }
+.bgm-track { margin: 0; display: grid; gap: 8px; align-content: start; }
+.bgm-track.off { opacity: .7; }
+.bgm-track .pills { margin-top: 0; }
+.bgm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.bgm-title { min-width: 0; overflow-wrap: anywhere; }
+.bgm-audio { width: 100%; height: 36px; }
+.bgm-file { margin: 0; overflow-wrap: anywhere; }
+.bgm-edit { padding-top: 10px; border-top: 1px dashed var(--line); gap: 12px; }
+.bgm-sources h3 { margin: 0 0 6px; font-size: 15px; }
+.bgm-source-list { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+@media (max-width: 820px) { .bgm-list { grid-template-columns: 1fr; } }

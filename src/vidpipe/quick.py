@@ -12,6 +12,8 @@
 3. **素材**：每個主題向 vidgrab 搜一批（YouTube，優先授權明確的）。**別的作品用過的素材不再用**
    （`work_dir/_quick/used.json`）；沒用過的不夠時換一組關鍵字再搜，真的沒有才重複使用並警告。
 4. **版面**：上方常駐標題（預設用第一句）、下方系列名稱、加大的字幕、背景音樂。
+5. **背景音樂**：本機曲庫（`bgm_dir`，見 `bgm.py`）有歌就從曲庫挑、輪流用；`music` 可以給標籤
+   （`"古琴"`）只挑那類。曲庫是空的才去 vidgrab 的音樂庫找。
 
 `build` 只組 manifest（不呼叫 TTS、不下載）；`run` = `build` ＋ `shorts.make`。
 """
@@ -28,7 +30,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from . import assets, jobs, ocr, timeline
+from . import assets, bgm, jobs, ocr, timeline
 from . import manifest as manifest_mod
 from .clients.vidgrab import VidgrabClient
 from .config import Config
@@ -144,8 +146,13 @@ def parse_request(doc: Any, *, today: dt.date | None = None) -> dict[str, Any]:
         value = doc.get(key, default)
         if isinstance(value, str) and value.strip().lower() in ("true", "false", "1", "0", ""):
             value = value.strip().lower() in ("true", "1") if value.strip() else default
-        if not isinstance(value, bool):
-            raise _fail(key, "要是 true 或 false")
+        if key == "music" and isinstance(value, str):    # 曲庫的標籤或曲名：「古琴」「古琴,笛簫」
+            if len(value) > 200:
+                raise _fail("music", "標籤太長了（最多 200 字）")
+            value = value.strip()
+        elif not isinstance(value, bool):
+            raise _fail(key, "要是 true 或 false" + ("，或曲庫的標籤（例如 古琴）"
+                                                   if key == "music" else ""))
         out[key] = value
     size = doc.get("subtitle_size") or "large"
     if size not in SUBTITLE_SIZES:
@@ -523,10 +530,23 @@ def build(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = No
                    for b, p in zip(beats, picks, strict=True)],
         "subtitles": {"burn_in": True, "size": req["subtitle_size"]},
         "overlays": overlays, "cover": {"text": req["title"]}}
+    music_report = None
     if req["music"]:
-        track = pick_music(cfg, req["id"], client, lib, warnings)
-        if track:
-            doc["music"] = {"asset_id": track, "start": 4, "volume": 0.22}
+        tags = req["music"] if isinstance(req["music"], str) else ""
+        local = bgm.pick(cfg, req["id"], tags, warnings=warnings)
+        if local:                      # 本機曲庫有歌就用曲庫（依標籤、輪流用）
+            doc["music"] = local["music"]
+            music_report = {"source": "library", "id": local["track"]["id"],
+                            "title": local["track"]["title"], "license": local["track"]["license"],
+                            "tags": local["track"]["tags"]}
+        else:
+            if tags:
+                warnings.append(f"背景音樂曲庫是空的（{bgm.root(cfg)}），不能依標籤「{tags}」挑，"
+                                "改從 vidgrab 的音樂庫找")
+            track = pick_music(cfg, req["id"], client, lib, warnings)
+            if track:
+                doc["music"] = {"asset_id": track, "start": 4, "volume": 0.22}
+                music_report = {"source": "vidgrab", "id": track}
     kinds = [(p["item"].get("license") or {}).get("kind") or "unknown" for p in picks]
     report = {"id": req["id"], "title": req["title"], "chars": chars(req["text"]),
               "estimated_seconds": round(chars(req["text"]) / 4.2 + len(beats) * 0.4, 1),
@@ -536,7 +556,7 @@ def build(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = No
                          "license": (p["item"].get("license") or {}).get("kind")}
                         for b, p in zip(beats, picks, strict=True)],
               "licenses": {k: kinds.count(k) for k in sorted(set(kinds))},
-              "warnings": warnings}
+              "music": music_report, "warnings": warnings}
     manifest_mod.parse(doc)        # 自己組的 manifest 也照同一套規則驗一次
     return {"manifest": doc, "report": report}
 
@@ -603,7 +623,8 @@ def run(req: dict[str, Any], cfg: Config, *, client: VidgrabClient | None = None
             "這些素材抓不下來或畫面有文字，已換掉：" + "、".join(dropped))
     record_use(cfg, req["id"], sorted({b["asset_id"] for b in built["report"]["beats"]}))
     result["warnings"] = [*built["report"]["warnings"], *result.get("warnings", [])]
-    result["quick"] = {k: built["report"][k] for k in ("chars", "estimated_seconds", "licenses")}
+    result["quick"] = {k: built["report"][k]
+                       for k in ("chars", "estimated_seconds", "licenses", "music")}
     return result
 
 

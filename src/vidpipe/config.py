@@ -55,6 +55,7 @@ class Config:
     # 聲音
     normalize_audio: bool = True   # 成片的響度標準化到 target_lufs（TTS 的音量常常偏小）
     target_lufs: float = -14.0     # 整合響度（LUFS）；Shorts／串流平台大約都落在 -14
+    bgm_dir: str = "bgm"           # 本機背景音樂曲庫（放音檔就能用，子資料夾＝標籤；見 bgm.py）
 
     def to_dict(self, mask: bool = False) -> dict[str, Any]:
         out = {f.name: getattr(self, f.name) for f in fields(self)}
@@ -112,7 +113,7 @@ GROUPS: tuple[Group, ...] = (
     Group("vidgrab", "素材來源 · vidgrab", "搜尋與下載素材、授權資訊"),
     Group("tts", "旁白 · TTS", "audio.cpp 或任何 OpenAI 風格的 /v1/audio/speech（例如 ttsgrab）"),
     Group("subtitles", "字幕", "語言、要不要燒進影片、用哪個字體"),
-    Group("audio", "聲音", "成片的響度"),
+    Group("audio", "聲音", "成片的響度與背景音樂曲庫"),
     Group("storage", "資料夾與紀錄", "中間產物、成品放哪裡，以及工作紀錄"),
 )
 
@@ -196,6 +197,13 @@ _SPEC_LIST: tuple[FieldSpec, ...] = (
         unit="LUFS", min=-30.0, max=-5.0, step=0.5,
         range_hint="Shorts 常用 -14；比 -16 小聲的片會被平台判成太小聲",
         depends_on="normalize_audio"),
+    FieldSpec(
+        "bgm_dir", "audio", "path", "背景音樂資料夾",
+        "自己的背景音樂曲庫：把音檔放進來就會被挑到，子資料夾名稱就是標籤（例如 古琴/、明亮/），"
+        "出片時輪流用。資料夾是空的才改從 vidgrab 的音樂庫找。"
+        "相對路徑是相對於 vidpipe 啟動時的目錄。"
+        "到「背景音樂」頁可以試聽、加標籤、填授權。",
+        placeholder="bgm", required=True, forbidden="\0", forbidden_label="空字元"),
     FieldSpec(
         "work_dir", "storage", "path", "work 目錄",
         "中間產物與快取：旁白、素材、每支片的資料夾、工作紀錄。相對路徑是相對於 vidpipe "

@@ -225,6 +225,8 @@ def cmd_quick(args: argparse.Namespace) -> int:
                                  ("series", args.series)) if v}
     if args.no_music:
         options["music"] = False
+    elif args.music:
+        options["music"] = args.music
     if args.only_clear_license:
         options["allow_unknown_license"] = False
     suffix = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -273,6 +275,48 @@ def cmd_voices(args: argparse.Namespace) -> int:
                      lambda: voices.transcribe_missing(cfg),
                      summary=lambda o: {k: o[k] for k in ("dir", "existing", "transcribed",
                                                           "failed")})
+
+
+def cmd_bgm(args: argparse.Namespace) -> int:
+    """本機背景音樂曲庫：列出、建立資料夾、替一支片挑一首、改一首的標籤與授權。"""
+    from . import bgm
+
+    cfg = config_mod.load()
+    if args.dir:
+        from dataclasses import replace
+
+        cfg = replace(cfg, bgm_dir=args.dir)
+    if args.action == "list":
+        info = bgm.describe(cfg)
+        if args.tags:
+            info["tracks"] = bgm.matching(info["tracks"], bgm._clean_tags(args.tags))
+        emit({"ok": True, **info})
+    elif args.action == "init":
+        emit({"ok": True, **bgm.init(cfg)})
+    elif args.action == "pick":
+        if not args.id:
+            raise BadInput("pick 要給 --id（作品 id；同一支片重做會拿到同一首）")
+        warnings: list[str] = []
+        got = bgm.pick(cfg, args.id, args.tags, record=not args.dry_run, warnings=warnings)
+        emit({"ok": True, "dir": str(bgm.root(cfg)), "music": got and got["music"],
+              "track": got and got["track"], "reused": bool(got and got["reused"]),
+              "warnings": warnings})
+    else:   # set
+        if not args.track:
+            raise BadInput("set 要給曲目（曲庫裡的相對路徑，例如 古琴/流水.mp3）")
+        changes: dict[str, Any] = {}
+        for key in ("title", "author", "license", "credit", "url", "note"):
+            if getattr(args, key) is not None:
+                changes[key] = getattr(args, key)
+        if args.tags is not None:
+            changes["tags"] = args.tags
+        for key in ("start", "volume"):
+            if getattr(args, key) is not None:
+                changes[key] = getattr(args, key)
+        if args.disable or args.enable:
+            changes["enabled"] = bool(args.enable)
+        emit({"ok": True, "track": bgm.update(cfg, args.track, changes)})
+    return 0
 
 
 def cmd_credits(args: argparse.Namespace) -> int:
@@ -464,6 +508,27 @@ def build_parser() -> argparse.ArgumentParser:
                    help="沒有逐字稿（同名 .txt）的用 audio.cpp 的 ASR 辨識，存回同一個資料夾")
     p.set_defaults(func=cmd_voices)
 
+    p = sub.add_parser("bgm", help="本機背景音樂曲庫：list／init／pick／set（子資料夾＝標籤）")
+    p.add_argument("action", choices=("list", "init", "pick", "set"),
+                   help="list 列出曲目與標籤；init 建立資料夾；pick 替一支片挑一首；"
+                        "set 改一首的資訊")
+    p.add_argument("track", nargs="?", help="set 的曲目（曲庫裡的相對路徑）")
+    p.add_argument("--dir", help="曲庫資料夾（預設用設定的 bgm_dir）")
+    p.add_argument("--id", help="pick：作品 id")
+    p.add_argument("--tags", help="list／pick：標籤（逗號隔開＝任一個）；set：這首的標籤")
+    p.add_argument("--dry-run", action="store_true", help="pick：只看會挑哪首，不記進輪替紀錄")
+    p.add_argument("--title")
+    p.add_argument("--author")
+    p.add_argument("--license", help="own、free、free-attribution 或 unknown")
+    p.add_argument("--credit", help="標註文字，例如 作者《曲名》（CC BY 4.0）— 網址")
+    p.add_argument("--url", help="出處網址")
+    p.add_argument("--note")
+    p.add_argument("--start", type=float, help="從第幾秒開始放")
+    p.add_argument("--volume", type=float, help="相對音量（預設 0.22）")
+    p.add_argument("--disable", action="store_true", help="不再挑這首")
+    p.add_argument("--enable", action="store_true", help="恢復挑這首")
+    p.set_defaults(func=cmd_bgm)
+
     p = sub.add_parser("quick", help="文案直出：一段文案（或一批 CSV／JSON）→ 成片，不需要 LLM")
     p.add_argument("script", nargs="?",
                    help="文案 .txt、單筆 .json、批次 .json／.jsonl／.csv；- 讀 stdin")
@@ -472,6 +537,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title", help="畫面上方的常駐標題（不給就用第一句）")
     p.add_argument("--series", help="畫面下方的系列名稱")
     p.add_argument("--no-music", action="store_true", help="不放背景音樂")
+    p.add_argument("--music", metavar="標籤",
+                   help="只從曲庫挑這類背景音樂（標籤或曲名，逗號隔開＝任一個，例如 古琴,笛簫）")
     p.add_argument("--only-clear-license", action="store_true",
                    help="只用授權明確的素材（預設也放行授權未標示的，credits 會標出來）")
     p.add_argument("--dry-run", action="store_true", help="只分鏡與挑素材，回 manifest，不做成片")

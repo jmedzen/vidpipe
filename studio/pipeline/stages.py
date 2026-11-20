@@ -237,7 +237,12 @@ class Run:
                 m["overlays"] = [{"text": self.cfg["series"] + "|" + script["title"],
                                   "position": "top", "size": "small"}]
         music = self.cfg.get("music")
-        if music and music.get("tracks"):       # 每支片固定挑一首(依 run id),重跑不會換
+        local = self.library_music(music) if music else None
+        if local:                               # 本機曲庫(bgm/)有歌:依標籤挑、輪流用
+            m["music"] = {**local, "duck_under_voice": music.get("duck_under_voice", True)}
+            if "volume" in music:
+                m["music"]["volume"] = music["volume"]
+        elif music and music.get("tracks"):     # 每支片固定挑一首(依 run id),重跑不會換
             tracks = music["tracks"]
             pick = tracks[int(quick._unit(self.id, "music") * len(tracks)) % len(tracks)]
             m["music"] = {"asset_id": pick, "start": music.get("start", 0),
@@ -245,6 +250,25 @@ class Run:
                           "duck_under_voice": music.get("duck_under_voice", True)}
         write(self.dir / "manifest.json", m)
         return m
+
+    def library_music(self, music: dict) -> dict | None:
+        """vidpipe 的本機背景音樂曲庫挑一首(`vidpipe bgm pick`);曲庫是空的或關掉回 None。"""
+        if music.get("source", "library") != "library":
+            return None
+        args = ["bgm", "pick", "--id", self.short_id]
+        tags = music.get("tags")
+        if tags:
+            args += ["--tags", ",".join(tags) if isinstance(tags, list) else str(tags)]
+        try:
+            got = vidpipe.run(self.cfg, *args, log=self.logfile, retries=0)
+        except vidpipe.VidpipeError as exc:
+            self.log(f"背景音樂曲庫讀不了({exc}),改用 music.tracks")
+            return None
+        for w in got.get("warnings", []):
+            self.log(w)
+        if got.get("track"):
+            self.log(f"背景音樂:{got['track']['id']}")
+        return got.get("music")
 
     # ---- 7 make
     def make(self) -> dict:
@@ -288,7 +312,9 @@ class Run:
                 footage_lines.append(line)
         src_file = vidpipe.work_dir(self.cfg, self.short_id) / "sources.json"
         music = (read(src_file).get("music") or {}).get("source") if src_file.is_file() else None
-        if music:
+        if music and music.get("kind") == "file":     # 本機曲庫:用曲庫裡寫的標註
+            lines += [f"配樂:{music.get('declared_credit') or Path(music['path']).stem}", ""]
+        elif music:
             licence = music.get("license") or {}
             lic = licence.get("name") or licence.get("label", "")
             lines += [f"配樂:{music.get('title', '')} — {music.get('author', '')}({lic})"
