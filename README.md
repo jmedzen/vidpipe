@@ -425,6 +425,10 @@ vidpipe serve                      # http://127.0.0.1:8320，會開預設瀏覽�
 vidpipe serve --port 8080
 ```
 
+**自動重載**：`vidpipe serve --watch`（或 `VIDPIPE_WATCH=1`）會每 2 秒看一次 vidpipe 的程式碼與前端產物，`git pull` 之後自動重新啟動，
+不必手動。重啟只換掉網頁伺服器；跑到一半的工作是獨立的子行程，不受影響。已經在跑、沒帶 `--watch` 的服務，
+`curl -X POST localhost:8320/api/restart -d '{"watch": true}'` 重啟的同時就會打開它。Docker 映像不需要（更新是換映像）。
+
 目前有四頁（另有「新增作品」）：**總覽**（ffmpeg／vidgrab／TTS 三張狀態卡，每 30 秒重新檢查，失敗時顯示原因與 hint；
 下方是最近的工作）、**作品**（每支片做到哪、長度、有幾個素材的授權要確認；點進去有成品播放器、
 每個場景與每句旁白的時間——點句子就跳到那一秒、素材與授權（含可以直接複製的說明欄範本）、檔案、manifest、
@@ -470,7 +474,7 @@ API（皆為 JSON，錯誤格式同 CLI）：
 |---|---|---|
 | GET | `/api/version` | 版本與 build（公開，給 healthcheck） |
 | GET | `/api/doctor?skip=…` | 等同 `vidpipe doctor` |
-| POST | `/api/restart` | 重新啟動 `vidpipe serve`（同樣的參數，換成新的行程）：`git pull` 之後載入新版用。回 202；進行中的工作是獨立的子行程，不受影響。Docker 裡請改用 `docker restart` |
+| POST | `/api/restart` | 重新啟動 `vidpipe serve`（同樣的參數，換成新的行程）：`git pull` 之後載入新版用。回 202；進行中的工作是獨立的子行程，不受影響。本體可帶 `{"watch": true}`，重啟後同時打開自動重載（見下）。Docker 裡請改用 `docker restart` |
 | GET | `/api/config` | 生效設定（祕密遮蔽） |
 | GET | `/api/settings` | 設定頁用：每個項目的分組、型別、說明、範圍、預設、現值與**來源**（`env`／`file`／`default`，`locked`＝被環境變數指定）、設定檔路徑／`revision`／可不可寫，以及設定檔的問題。**祕密沒有值**，只有 `is_set`。設定檔壞掉時照樣回 200（`/api/config` 會回 `bad_config`） |
 | PUT | `/api/settings` | 存設定：`{"changes": {"tts_model": "x", "target_lufs": -16, "tts_token": "…"}, "revision": "…"}`；值 `null`＝改回預設（token＝清掉），沒列的項目不動。不合格回 400 `bad_input`，`error.fields` 是 `{項目: 原因}`，**整批都不會存**；被環境變數指定的項目也是 400；`revision` 不是現在的設定檔回 409 `stale_config`（不給就不檢查）；設定檔壞了回 409，`"replace_invalid": true` 才會覆寫（先備份成 `.bak`）；唯讀部署回 403。回傳同 GET，加 `changed` |

@@ -23,7 +23,8 @@ w, h = (1920, 1080) if m.get("output", {}).get("aspect") == "16:9" else (1080, 1
 video = out / f"{m['id']}.mp4"
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
                 f"testsrc2=s={w}x{h}:r=30:d={total}", "-f", "lavfi", "-i",
-                f"anoisesrc=d={total}:c=pink:a=0.5", "-af", "loudnorm=I=-14:TP=-2",
+                f"anoisesrc=d={total}:c=pink:a=0.5:seed=7", "-af",
+                "loudnorm=I=-14:TP=-3,alimiter=limit=0.7:level=false",
                 "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac",
                 "-ar", "48000", "-shortest", str(video)], check=True)
 scenes, srt = [], []

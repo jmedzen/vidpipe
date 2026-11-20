@@ -466,3 +466,51 @@ def test_restart_endpoint_answers_then_stops_the_server_and_reexecs_with_the_sam
     argv = server.restart_argv(["/x/vidpipe", "serve", "--port", "8320", "--no-auth"])
     assert argv[1:] == ["-m", "vidpipe", "serve", "--port", "8320", "--no-auth", "--no-open"]
     assert server.restart_argv(["v", "serve", "--no-open"]).count("--no-open") == 1
+
+
+def test_watch_restarts_when_the_source_changes_and_waits_for_the_pull_to_finish(tmp_path):
+    import threading
+    import time
+
+    from vidpipe import server
+
+    (tmp_path / "a.py").write_text("x = 1\n")
+    stamp = server.source_stamp(tmp_path)
+    assert stamp > 0
+    stopped = []
+
+    class Httpd:
+        def shutdown(self):
+            stopped.append(True)
+
+    server.RESTART.clear()
+    server.WATCH_NEXT.clear()
+    stop = threading.Event()
+    server.watch_source(Httpd(), interval=0.05, settle=0.15, root=tmp_path, stop=stop)
+    time.sleep(0.3)
+    assert not stopped                                  # 沒變就不重啟
+    for n in range(4):                                  # git pull：連續改好幾個檔
+        (tmp_path / f"b{n}.py").write_text(f"y = {n}\n")
+        time.sleep(0.05)
+    deadline = time.monotonic() + 3
+    while not stopped and time.monotonic() < deadline:
+        time.sleep(0.05)
+    stop.set()
+    assert stopped == [True] and server.RESTART.is_set() and server.WATCH_NEXT.is_set()
+    argv = server.restart_argv(["v", "serve", "--port", "1"], watch=server.WATCH_NEXT.is_set())
+    assert argv[-2:] == ["--no-open", "--watch"]
+    assert server.restart_argv(["v", "serve", "--watch"], watch=True).count("--watch") == 1
+    server.RESTART.clear()
+    server.WATCH_NEXT.clear()
+
+
+def test_restart_endpoint_can_turn_watch_on(start, monkeypatch):
+    from vidpipe import server
+
+    monkeypatch.setattr(server, "request_restart", lambda httpd, delay=0.3: None)
+    server.WATCH_NEXT.clear()
+    run = start()
+    body = run.post("/api/restart", json={"watch": True}).json()
+    assert body == {"ok": True, "restarting": True, "watch": True}
+    server.WATCH_NEXT.clear()
+    assert run.post("/api/restart", json={}).json()["watch"] is False
