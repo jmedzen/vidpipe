@@ -63,7 +63,8 @@ def make(manifest: Manifest, cfg: Config, listing: Path, total: float, dest: Pat
     ass = work / f".{dest.stem}.title.ass"
     try:
         if label.strip():
-            ass.write_text(title_ass(label, manifest.output, cfg.subtitle_font),
+            ass.write_text(title_ass(label, manifest.output,
+                                     manifest.subtitles.font or cfg.subtitle_font),
                            encoding="utf-8")
             flt.insert(0, f"ass={filter_value(str(ass))}")
         dest.parent.mkdir(parents=True, exist_ok=True)

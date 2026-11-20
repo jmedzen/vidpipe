@@ -1,0 +1,11 @@
+{
+  "schema": "vidpipe.template/1",
+  "name": "zen",
+  "label": "靜心",
+  "description": "不放常駐標題，素材完整保留（模糊背景補邊），淡黃字幕、系列名稱在上方，配樂稍大。",
+  "fit": "blur_pad",
+  "subtitles": {"color": "paleyellow", "margin": 0.26},
+  "title": {"show": false},
+  "series": {"position": "top", "color": "paleyellow"},
+  "music": {"volume": 0.3}
+}

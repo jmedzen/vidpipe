@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 from vidpipe import config as vidpipe_config
-from vidpipe import ocr, quick
+from vidpipe import ocr, quick, templates
 
 from . import llm, qc, textcheck, vidpipe
 from .config import abspath
@@ -227,7 +227,19 @@ class Run:
              "subtitles": {"langs": "zh-TW", "burn_in": True,
                            "size": self.cfg.get("subtitle_size", "large")},
              "cover": {"text": script["title"]}}
-        if self.cfg.get("overlays", True):      # 常駐標題與系列名稱(vidpipe 的 overlays)
+        tpl = self.template()
+        if tpl is not None:                     # 排版模板:標題、系列名稱、字幕樣式、裁切、配樂音量
+            parts = templates.manifest_parts(
+                tpl, title=script["title"],
+                series=self.cfg.get("series", "") if self.cfg.get("overlays", True) else "",
+                subtitle_size=self.cfg.get("subtitle_size"))
+            m["output"]["aspect"] = parts["aspect"]
+            m["subtitles"] = {"langs": "zh-TW", **parts["subtitles"]}
+            for scene in m["scenes"]:
+                scene["fit"] = parts["fit"]
+            if self.cfg.get("overlays", True) and parts["overlays"]:
+                m["overlays"] = parts["overlays"]
+        elif self.cfg.get("overlays", True):    # 常駐標題與系列名稱(vidpipe 的 overlays)
             if self.fmt == "short":
                 m["overlays"] = [{"text": script["title"], "position": "top", "size": "xlarge",
                                   "color": "yellow"},
@@ -241,10 +253,25 @@ class Run:
             tracks = music["tracks"]
             pick = tracks[int(quick._unit(self.id, "music") * len(tracks)) % len(tracks)]
             m["music"] = {"asset_id": pick, "start": music.get("start", 0),
-                          "volume": music.get("volume", 0.22),
+                          "volume": tpl["music"]["volume"] if tpl is not None
+                          else music.get("volume", 0.22),
                           "duck_under_voice": music.get("duck_under_voice", True)}
         write(self.dir / "manifest.json", m)
         return m
+
+    def template(self) -> dict | None:
+        """pipeline.json 的 "template"(或 --template):模板名稱或 .json 路徑。沒寫就照原本的版面。
+
+        只用在 Shorts。名稱到 "template_dir"(預設 ../templates,跟 vidpipe 網頁存的同一個資料夾)
+        找,再找 vidpipe 內建的(classic、clean、bold、zen)。
+        """
+        ref = self.cfg.get("template")
+        if not ref or self.fmt != "short":
+            return None
+        if ref.endswith(".json"):
+            ref = abspath(self.cfg, ref)
+        tdir = abspath(self.cfg, self.cfg.get("template_dir", "../templates"))
+        return templates.get(ref, vidpipe_config.Config(template_dir=tdir))
 
     # ---- 7 make
     def make(self) -> dict:

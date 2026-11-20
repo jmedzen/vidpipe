@@ -222,7 +222,7 @@ def cmd_quick(args: argparse.Namespace) -> int:
     text = args.text if args.text else _read_script(args)
     name = "" if args.text else str(args.script or "")
     options = {k: v for k, v in (("id", args.id), ("title", args.title),
-                                 ("series", args.series)) if v}
+                                 ("series", args.series), ("template", args.template)) if v}
     if args.no_music:
         options["music"] = False
     if args.only_clear_license:
@@ -230,18 +230,21 @@ def cmd_quick(args: argparse.Namespace) -> int:
     suffix = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     head = text.lstrip("\ufeff").lstrip()[:1]
     if suffix in ("csv", "jsonl") or head == "[" or (suffix == "json" and head != "{"):
-        reqs = [{**r, **{k: v for k, v in options.items() if k != "id"}}
-                for r in quick.parse_batch(text, fmt=suffix if suffix != "json" else "json")]
+        # 模板要在驗證時就套用（字幕字級、長寬比沒寫的用模板的），所以當成共用選項傳進去
+        shared = {"template": args.template} if args.template else None
+        reqs = [{**r, **{k: v for k, v in options.items() if k not in ("id", "template")}}
+                for r in quick.parse_batch(text, fmt=suffix if suffix != "json" else "json",
+                                           shared=shared, cfg=cfg)]
         return _recorded("quick-batch", {"items": len(reqs), "ids": [r["id"] for r in reqs]},
                          lambda: quick.run_batch(reqs, cfg),
                          summary=lambda o: {k: o[k] for k in ("total", "done", "failed")})
     doc = json.loads(text) if head == "{" else {"text": text}
     if isinstance(doc, dict) and isinstance(doc.get("items"), list):
-        reqs = quick.parse_batch(doc)
+        reqs = quick.parse_batch(doc, cfg=cfg)
         return _recorded("quick-batch", {"items": len(reqs), "ids": [r["id"] for r in reqs]},
                          lambda: quick.run_batch(reqs, cfg),
                          summary=lambda o: {k: o[k] for k in ("total", "done", "failed")})
-    req = quick.parse_request({**doc, **options})
+    req = quick.parse_request({**doc, **options}, cfg=cfg)
     if args.dry_run:
         emit({"ok": True, **quick.build(req, cfg)})
         return 0
@@ -273,6 +276,43 @@ def cmd_voices(args: argparse.Namespace) -> int:
                      lambda: voices.transcribe_missing(cfg),
                      summary=lambda o: {k: o[k] for k in ("dir", "existing", "transcribed",
                                                           "failed")})
+
+
+def cmd_templates(args: argparse.Namespace) -> int:
+    """排版模板：列出、看內容、存（從 JSON 檔）、刪。"""
+    from . import templates
+
+    cfg = config_mod.load()
+    action, target = args.action, args.target
+    if action in ("show", "save", "delete") and not target:
+        raise BadInput(f"templates {action} 要給{'檔案' if action == 'save' else '模板名稱'}",
+                       hint="例：vidpipe templates show classic")
+    if action == "list":
+        emit({"ok": True, "dir": str(templates.user_dir(cfg)), "default": cfg.default_template,
+              "items": [{k: v for k, v in it.items() if k != "template"}
+                        | (templates.summary(it["template"]) if "template" in it else {})
+                        for it in templates.list_all(cfg)]})
+    elif action == "show":
+        emit({"ok": True, "template": templates.get(target, cfg)})
+    elif action == "save":
+        text = sys.stdin.read() if target == "-" else _read_path(target)
+        try:
+            doc = json.loads(text)
+        except ValueError as exc:
+            raise BadInput(f"模板不是合法的 JSON：{exc}") from exc
+        emit({"ok": True, **templates.save(doc, cfg, name=args.name)})
+    else:
+        emit({"ok": True, **templates.delete(target, cfg)})
+    return 0
+
+
+def _read_path(path: str) -> str:
+    from pathlib import Path
+
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BadInput(f"讀不了 {path}：{exc.strerror or exc}") from exc
 
 
 def cmd_credits(args: argparse.Namespace) -> int:
@@ -471,12 +511,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", help="作品 id（單筆；不給就用日期加文案雜湊）")
     p.add_argument("--title", help="畫面上方的常駐標題（不給就用第一句）")
     p.add_argument("--series", help="畫面下方的系列名稱")
+    p.add_argument("--template",
+                   help="排版模板：名稱或 .json 路徑（`vidpipe templates` 列出可用的）")
     p.add_argument("--no-music", action="store_true", help="不放背景音樂")
     p.add_argument("--only-clear-license", action="store_true",
                    help="只用授權明確的素材（預設也放行授權未標示的，credits 會標出來）")
     p.add_argument("--dry-run", action="store_true", help="只分鏡與挑素材，回 manifest，不做成片")
     p.add_argument("-o", "--output", help="輸出檔（單筆），預設 <out_dir>/<id>.mp4")
     p.set_defaults(func=cmd_quick)
+
+    p = sub.add_parser("templates",
+                       help="排版模板：列出、看內容、存、刪（文案直出用 --template 選）")
+    p.add_argument("action", nargs="?", default="list", choices=("list", "show", "save", "delete"),
+                   help="list（預設）、show 名稱、save 檔案.json（- 讀 stdin）、delete 名稱")
+    p.add_argument("target", nargs="?", help="模板名稱，或 save 時的 JSON 檔")
+    p.add_argument("--name", help="save 時改用這個名稱存（蓋過檔案裡的 name）")
+    p.set_defaults(func=cmd_templates)
 
     p = sub.add_parser("plan", help="草稿（場景可以只寫 query）→ 搜尋並挑素材與音樂 → manifest")
     p.add_argument("script", help="草稿 .json，或純文字腳本（空白行隔開場景）；- 讀 stdin")

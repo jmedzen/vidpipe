@@ -106,9 +106,14 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--format", choices=["short", "long"], default="short")
     b.add_argument("--name", default="default")
     b.add_argument("--date", default=None)
+    for sp in (r, b):
+        sp.add_argument("--template", default=None,
+                        help="排版模板(名稱或 .json 路徑),蓋過 pipeline.json 的 template")
     sub.add_parser("status", help="每個 run 做到哪")
     args = p.parse_args(argv)
     cfg = config.load()
+    if getattr(args, "template", None):
+        cfg["template"] = args.template
     return {"run": cmd_run, "batch": cmd_batch, "status": cmd_status}[args.cmd](args, cfg)
 
 

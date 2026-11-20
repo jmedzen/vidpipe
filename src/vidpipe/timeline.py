@@ -310,7 +310,8 @@ def run(manifest: Manifest, raw: Any, cfg: Config) -> dict[str, Any]:
         "sample_rate": audio["sample_rate"], "channels": audio["channels"]}
     data["subtitles"] = None if subs is None else {
         "langs": manifest.subtitles.langs, "style": manifest.subtitles.style,
-        "burn_in": manifest.subtitles.burn_in, "font": cfg.subtitle_font,
+        "burn_in": manifest.subtitles.burn_in,
+        "font": manifest.subtitles.font or cfg.subtitle_font,
         "srt": SRT_FILE, "ass": ASS_FILE, "entries": len(subs.entries)}
     data["voice"] = {"model": cfg.tts_model, "voice_ref": cfg.voice_ref,
                      "reference_text": cfg.reference_text}

@@ -512,18 +512,28 @@ def launch_voices(cfg: Config) -> dict[str, Any] | None:
             "files": [it["name"] for it in missing]}
 
 
-QUICK_SHARED = ("series", "music", "allow_unknown_license", "subtitle_size", "aspect")
+def list_templates(cfg: Config) -> dict[str, Any]:
+    """排版模板：內建＋自訂，連同完整內容（網頁要畫示意圖）。"""
+    from . import templates
+
+    return {"dir": str(templates.user_dir(cfg)), "default": cfg.default_template,
+            "colors": templates.COLORS, "items": templates.list_all(cfg)}
 
 
-def quick_preview(body: dict[str, Any]) -> dict[str, Any]:
+QUICK_SHARED = ("series", "music", "allow_unknown_license", "subtitle_size", "aspect",
+                "template")
+
+
+def quick_preview(body: dict[str, Any], cfg: Config | None = None) -> dict[str, Any]:
     """文案直出的分鏡預覽：不連網、不開工作。回每個鏡頭的文字與畫面主題、粗估秒數。"""
     from . import quick
 
-    req = quick.parse_request(body)
+    req = quick.parse_request(body, cfg=cfg)
     beats = quick.storyboard(req["text"])
     return {"id": req["id"], "title": req["title"], "chars": quick.chars(req["text"]),
             "estimated_seconds": round(quick.chars(req["text"]) / 4.2 + len(beats) * 0.4, 1),
-            "beats": beats, "themes": list(quick.library()["themes"])}
+            "beats": beats, "themes": list(quick.library()["themes"]),
+            "template": req["template"]}
 
 
 def launch_quick(cfg: Config, body: dict[str, Any]) -> dict[str, Any]:
@@ -540,7 +550,7 @@ def launch_quick(cfg: Config, body: dict[str, Any]) -> dict[str, Any]:
         fmt = body.get("format") or ""
         if not isinstance(fmt, str):
             raise BadInput("format 要是字串（json、jsonl、csv）")
-        reqs = quick.parse_batch(raw, fmt=fmt, shared=shared)
+        reqs = quick.parse_batch(raw, fmt=fmt, shared=shared, cfg=cfg)
         for req in reqs:
             _assert_idle(cfg, req["id"])
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
@@ -550,7 +560,7 @@ def launch_quick(cfg: Config, body: dict[str, Any]) -> dict[str, Any]:
         job_id = _spawn(cfg, [sys.executable, "-m", "vidpipe", "quick", str(path)])
         return {"op": "quick-batch", "job": job_id, "status_url": f"/api/job/{job_id}",
                 "ids": [r["id"] for r in reqs]}
-    req = quick.parse_request(body)
+    req = quick.parse_request(body, cfg=cfg)
     _assert_idle(cfg, req["id"])
     path = quick.store_request(cfg, req)
     job_id = _spawn(cfg, [sys.executable, "-m", "vidpipe", "quick", str(path)])

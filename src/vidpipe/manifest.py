@@ -18,12 +18,18 @@ agent 寫（或之後由 `plan` 產生）一份 JSON，`narrate`、`render` 都�
         {"id": "s2", "sentences": [{"text": "夜市很熱鬧。", "en": "The market is lively."}]},
         {"id": "s3", "min_duration": 2.0}                  // 沒有旁白的場景要給最短長度
       ],
-      "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom"},
+      "subtitles": {"langs": "zh-TW", "burn_in": true, "style": "bold-bottom",
+                    "size": "large", "color": "white", "en_color": "paleyellow",
+                    "margin": 0.2, "box": false, "font": ""},   // 後面五個選填：樣式
+
       "music": {"path": "/path/bgm.mp3", "start": 0, "volume": 0.3, "duck_under_voice": true},
       "cover": {"at": 1.0, "text": "台北夜市"},           // 選填；text 預設用 title，"" 不放字
       "overlays": [{"text": "為什麼越想放下，越放不下？", "position": "top",
                     "size": "large", "color": "yellow"}]   // 選填；整支片都在的疊字
     }
+
+顏色（`subtitles.color`、`en_color`、`overlays[].color`）可以寫名稱（white、yellow、paleyellow、
+cyan、pink、orange、green、black）或 `#RRGGBB`。排版模板（`templates.py`）組出來的就是這些欄位。
 
 一個 scene 的旁白可以給 `text`（自動分句）或 `sentences`（明確列出每一句，雙語字幕要配對英文時用）。
 不認得的欄位一律報錯（多半是打錯字），錯誤訊息帶路徑，例如 `scenes[2].text`。
@@ -38,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from . import text as text_mod
+from .colors import COLORS, is_color
 from .config import Config
 from .errors import BadInput, NotFound
 from .video import ASPECTS, FITS, OutputSpec, parse_focus
@@ -52,7 +59,8 @@ FILE_LICENSES = ("own", "free", "free-attribution")
 # 常駐疊字（整支片都在的標題、系列名稱）
 OVERLAY_POSITIONS = ("top", "bottom")
 OVERLAY_SIZES = ("xlarge", "large", "medium", "small")
-OVERLAY_COLORS = ("white", "yellow")
+OVERLAY_COLORS = tuple(COLORS)   # 也可以寫 #RRGGBB
+MAX_SUBTITLE_MARGIN = 0.45       # 字幕離底邊最多佔畫面高度的比例（再高就跑到上半部）
 MAX_OVERLAYS = 4
 MAX_OVERLAY_CHARS = 40
 
@@ -87,6 +95,11 @@ class Subtitles:
     burn_in: bool = True
     style: str = "bold-bottom"
     size: str = "normal"      # 字幕字級：normal／large／xlarge
+    color: str = "white"      # 中文字幕的顏色（名稱或 #RRGGBB）
+    en_color: str = "paleyellow"   # 雙語時英文的顏色
+    margin: float | None = None    # 離底邊佔畫面高度的比例；None = 直式 0.2、橫式 0.08
+    box: bool = False         # True：半透明黑底框（取代描邊）
+    font: str = ""            # 這支片的字體；空 = 用設定的 subtitle_font
 
 
 @dataclass(frozen=True)
@@ -149,6 +162,13 @@ def _bool(value: Any, path: str) -> bool:
 def _choice(value: Any, path: str, options: tuple[str, ...]) -> str:
     if value not in options:
         raise _fail(path, f"不認得 {value!r}", f"可用：{', '.join(options)}")
+    return str(value)
+
+
+def _color(value: Any, path: str) -> str:
+    if not is_color(value):
+        raise _fail(path, f"不認得的顏色 {value!r}",
+                    f"可用：{', '.join(COLORS)}，或 #RRGGBB")
     return str(value)
 
 
@@ -255,12 +275,22 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
     timing = Timing(*(_num(t.get(k, getattr(defaults, k)), f"timing.{k}", hi=10)
                       for k in ("lead", "gap", "tail")))
 
-    s = _obj(top.get("subtitles", {}), "subtitles", {"langs", "burn_in", "style", "size"})
+    s = _obj(top.get("subtitles", {}), "subtitles",
+             {"langs", "burn_in", "style", "size", "color", "en_color", "margin", "box", "font"})
+    font = _str(s.get("font", ""), "subtitles.font", allow_empty=True)
+    if any(c in font for c in ",\n\r"):
+        raise _fail("subtitles.font", "不能含逗號或換行")
     subtitles = Subtitles(
         langs=_choice(s.get("langs", subtitle_langs), "subtitles.langs", SUBTITLE_LANGS),
         burn_in=_bool(s["burn_in"], "subtitles.burn_in") if "burn_in" in s else burn_in,
         style=_choice(s.get("style", "bold-bottom"), "subtitles.style", SUBTITLE_STYLES),
-        size=_choice(s.get("size", "normal"), "subtitles.size", SUBTITLE_SIZES))
+        size=_choice(s.get("size", "normal"), "subtitles.size", SUBTITLE_SIZES),
+        color=_color(s.get("color", "white"), "subtitles.color"),
+        en_color=_color(s.get("en_color", "paleyellow"), "subtitles.en_color"),
+        margin=_num(s["margin"], "subtitles.margin", lo=0.0, hi=MAX_SUBTITLE_MARGIN)
+        if "margin" in s else None,
+        box=_bool(s["box"], "subtitles.box") if "box" in s else False,
+        font=font)
 
     music = None
     if "music" in top and top["music"] is not None:
@@ -299,7 +329,7 @@ def parse(data: Any, *, subtitle_langs: str = "zh-TW", burn_in: bool = True,
                 "text": label,
                 "position": _choice(o.get("position", "top"), f"{p}.position", OVERLAY_POSITIONS),
                 "size": _choice(o.get("size", "medium"), f"{p}.size", OVERLAY_SIZES),
-                "color": _choice(o.get("color", "white"), f"{p}.color", OVERLAY_COLORS)})
+                "color": _color(o.get("color", "white"), f"{p}.color")})
 
     raw_scenes = top["scenes"]
     if not isinstance(raw_scenes, list) or not raw_scenes:
